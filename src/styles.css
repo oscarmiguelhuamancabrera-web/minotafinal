@@ -318,3 +318,85 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
     flex: 1 1 100%;
   }
 }
+
+/* Ajustes v1.0.3 */
+.toast.info { border-color: #bfdbfe; color: #1d4ed8; }
+.social-button {
+  width: 100%;
+  min-height: 50px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 12px;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 900;
+  display: grid;
+  grid-template-columns: 42px 1fr 42px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  box-shadow: 0 4px 14px rgba(17, 24, 39, .04);
+}
+.social-button:hover { background: #f9fafb; border-color: #d1d5db; transform: translateY(-1px); }
+.social-button > span:nth-child(2) { text-align: center; }
+.social-icon { display: flex; align-items: center; justify-content: center; font-weight: 900; }
+.google-icon {
+  font-family: Arial, sans-serif;
+  font-size: 19px;
+  color: #4285f4;
+}
+.microsoft-icon {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+}
+.microsoft-icon i { display: block; border-radius: 1px; }
+.microsoft-icon i:nth-child(1) { background: #f25022; }
+.microsoft-icon i:nth-child(2) { background: #7fba00; }
+.microsoft-icon i:nth-child(3) { background: #00a4ef; }
+.microsoft-icon i:nth-child(4) { background: #ffb900; }
+.inline-new-course {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px dashed var(--purple-border);
+  background: #fcfaff;
+}
+.tutorial-card { max-width: 620px; }
+.tutorial-steps {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+  text-align: left;
+}
+.tutorial-steps > div {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid #eadcff;
+}
+.tutorial-steps b {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: linear-gradient(135deg, var(--purple), #a855f7);
+}
+.tutorial-steps span { display: grid; gap: 3px; }
+.tutorial-steps strong { color: var(--purple-dark); }
+.tutorial-steps small { color: var(--muted); line-height: 1.4; }
+@media (max-width: 520px) {
+  .social-button { grid-template-columns: 34px 1fr 34px; }
+  .tutorial-steps > div { grid-template-columns: 36px 1fr; }
+}

@@ -66,7 +66,8 @@ function buildProfileFromAuthUser(user) {
     role: email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'student',
     status: 'active',
     career_id: null,
-    current_cycle_id: null
+    current_cycle_id: null,
+    has_seen_tutorial: false
   }
 }
 
@@ -197,6 +198,11 @@ function App() {
       recordLoginActivity(userProfile)
     }
 
+    if (userProfile.role !== 'admin' && userProfile.has_seen_tutorial === false) {
+      setScreen('tutorial')
+      return
+    }
+
     setScreen(userProfile.role === 'admin' ? 'admin-dashboard' : 'dashboard')
   }
 
@@ -235,8 +241,9 @@ function App() {
     if (!userId) return
     const { data, error } = await supabase
       .from('calculation_history')
-      .select('*, course:courses(name)')
+      .select('*, course:courses!inner(name,status)')
       .eq('user_id', userId)
+      .eq('course.status', 'active')
       .order('created_at', { ascending: false })
       .limit(50)
     if (!error) setHistory(data || [])
@@ -324,6 +331,24 @@ function App() {
       options: { redirectTo: window.location.origin }
     })
     if (error) notify('error', getErrorMessage(error))
+  }
+
+  function handleMicrosoftLogin() {
+    notify('info', 'Disponible próximamente.')
+  }
+
+  async function handleFinishTutorial() {
+    if (!session?.user) return
+    const { error } = await supabase
+      .from('profiles')
+      .update({ has_seen_tutorial: true, updated_at: new Date().toISOString() })
+      .eq('id', session.user.id)
+    if (error) {
+      notify('error', getErrorMessage(error))
+      return
+    }
+    setProfile((prev) => prev ? { ...prev, has_seen_tutorial: true } : prev)
+    setScreen('calculator')
   }
 
   async function handlePasswordReset(email) {
@@ -437,26 +462,31 @@ function App() {
     }
   }
 
-  async function handleCreateCourse(name) {
+  async function handleCreateCourse(name, options = {}) {
     if (!name.trim()) {
       notify('error', 'Ingresa el nombre del curso.')
-      return
+      return null
     }
     if (!profile?.career_id || !profile?.current_cycle_id) {
       notify('error', 'Completa tu carrera y ciclo antes de crear cursos.')
-      return
+      return null
     }
-    const { error } = await supabase.from('courses').insert({
+    const { data, error } = await supabase.from('courses').insert({
       name: name.trim(),
       career_id: profile.career_id,
       cycle_id: profile.current_cycle_id,
       created_by: profile.id
-    })
-    if (error) notify('error', 'No se pudo crear el curso. Puede que ya exista para tu carrera y ciclo.')
-    else {
-      notify('success', 'Curso creado y disponible para tu carrera y ciclo.')
-      await loadCourses()
+    }).select('*, career:careers(name), cycle:cycles(name), creator:profiles!courses_created_by_fkey(first_name,last_name,email)').single()
+    if (error) {
+      notify('error', 'No se pudo crear el curso. Puede que ya exista para tu carrera y ciclo.')
+      return null
     }
+    notify('success', 'Curso creado y disponible para tu carrera y ciclo.')
+    await loadCourses()
+    if (options.select && data?.id) {
+      await loadCourseGrades(data.id)
+    }
+    return data
   }
 
   async function handleUpdateProfile(values) {
@@ -554,16 +584,19 @@ function App() {
       {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
       <main className="app-container">
         {!session && !guestMode && screen === 'welcome' && (
-          <Welcome onLogin={() => setScreen('login')} onRegister={() => setScreen('register')} onGuest={enterGuestMode} onGoogle={handleGoogleLogin} />
+          <Welcome onLogin={() => setScreen('login')} onRegister={() => setScreen('register')} onGuest={enterGuestMode} onGoogle={handleGoogleLogin} onMicrosoft={handleMicrosoftLogin} />
         )}
         {!session && !guestMode && screen === 'login' && (
-          <Login onSubmit={handleLogin} onReset={handlePasswordReset} onGoogle={handleGoogleLogin} onRegister={() => setScreen('register')} onBack={() => setScreen('welcome')} />
+          <Login onSubmit={handleLogin} onReset={handlePasswordReset} onGoogle={handleGoogleLogin} onMicrosoft={handleMicrosoftLogin} onRegister={() => setScreen('register')} onBack={() => setScreen('welcome')} />
         )}
         {!session && !guestMode && screen === 'register' && (
           <Register careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('welcome')} />
         )}
         {session && screen === 'complete-profile' && (
           <CompleteProfile careers={careers} cycles={cycles} profile={profile} onSubmit={handleUpdateProfile} />
+        )}
+        {session && screen === 'tutorial' && (
+          <OnboardingTutorial onStart={handleFinishTutorial} onSkip={handleFinishTutorial} />
         )}
         {(session || guestMode) && (
           <AuthenticatedLayout
@@ -603,6 +636,7 @@ function App() {
                 courses={courses}
                 selectedCourseId={selectedCourseId}
                 onSelectCourse={loadCourseGrades}
+                onCreateCourse={handleCreateCourse}
                 grades={grades}
                 setGrades={setGrades}
                 settings={settings}
@@ -634,15 +668,16 @@ function Splash() {
   return <div className="splash"><img src="/logo.png" alt="Mi Nota Final" /><p>Cargando Mi Nota Final...</p></div>
 }
 
-function Welcome({ onLogin, onRegister, onGuest, onGoogle }) {
+function Welcome({ onLogin, onRegister, onGuest, onGoogle, onMicrosoft }) {
   return (
     <section className="welcome-card">
       <img className="brand-logo" src="/logo.png" alt="Mi Nota Final" />
       <h1>Mi Nota Final</h1>
       <p>Calcula tu nota. Conoce tu meta. Aprueba.</p>
       <div className="stack">
-        <button className="btn primary" onClick={onGoogle}>🔐 Continuar con Google</button>
-        <button className="btn secondary" onClick={onLogin}>✉️ Iniciar sesión</button>
+        <SocialButton provider="google" onClick={onGoogle}>Continuar con Google</SocialButton>
+        <SocialButton provider="microsoft" onClick={onMicrosoft}>Continuar con Microsoft</SocialButton>
+        <button className="btn secondary" onClick={onLogin}>✉️ Iniciar sesión con correo</button>
         <button className="btn ghost" onClick={onRegister}>Crear cuenta</button>
         <button className="btn link" onClick={onGuest}>Continuar como invitado</button>
       </div>
@@ -651,7 +686,42 @@ function Welcome({ onLogin, onRegister, onGuest, onGoogle }) {
   )
 }
 
-function Login({ onSubmit, onReset, onGoogle, onRegister, onBack }) {
+function SocialButton({ provider, onClick, children }) {
+  return (
+    <button type="button" className="social-button" onClick={onClick}>
+      <span className={`social-icon ${provider}-icon`} aria-hidden="true">
+        {provider === 'google' && 'G'}
+        {provider === 'microsoft' && <><i></i><i></i><i></i><i></i></>}
+      </span>
+      <span>{children}</span>
+      <span aria-hidden="true"></span>
+    </button>
+  )
+}
+
+function OnboardingTutorial({ onStart, onSkip }) {
+  return (
+    <section className="auth-card tutorial-card fade-in">
+      <img className="mini-logo" src="/logo.png" alt="Mi Nota Final" />
+      <p className="eyebrow">Primer uso</p>
+      <h1>Bienvenido a Mi Nota Final</h1>
+      <p>Para calcular tus notas sigue estos pasos:</p>
+      <div className="tutorial-steps">
+        <div><b>1</b><span><strong>Selecciona tu curso</strong><small>Elige uno de la lista. Si no aparece, agrégalo para tu carrera y ciclo.</small></span></div>
+        <div><b>2</b><span><strong>Ingresa tus notas</strong><small>Coloca las notas que ya tienes y deja vacío lo pendiente.</small></span></div>
+        <div><b>3</b><span><strong>Calcula tu promedio</strong><small>Verás cuánto llevas hasta ahora y qué necesitas para aprobar.</small></span></div>
+        <div><b>4</b><span><strong>Guarda el resultado</strong><small>Solo se guarda cuando presionas “Guardar resultado”.</small></span></div>
+      </div>
+      <div className="action-row">
+        <button className="btn primary" onClick={onStart}>Empezar</button>
+        <button className="btn ghost" onClick={onSkip}>Omitir tutorial</button>
+      </div>
+      <Footer />
+    </section>
+  )
+}
+
+function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onBack }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   return (
@@ -659,7 +729,8 @@ function Login({ onSubmit, onReset, onGoogle, onRegister, onBack }) {
       <input className="input" type="email" placeholder="Correo electrónico" value={email} onChange={(e) => setEmail(e.target.value)} />
       <input className="input" type="password" placeholder="Contraseña" value={password} onChange={(e) => setPassword(e.target.value)} />
       <button className="btn primary" onClick={() => onSubmit(email, password)}>Ingresar</button>
-      <button className="btn secondary" onClick={onGoogle}>Continuar con Google</button>
+      <SocialButton provider="google" onClick={onGoogle}>Continuar con Google</SocialButton>
+      <SocialButton provider="microsoft" onClick={onMicrosoft}>Continuar con Microsoft</SocialButton>
       <button className="btn link" onClick={() => onReset(email)}>Olvidé mi contraseña</button>
       <button className="btn ghost" onClick={onRegister}>Crear cuenta nueva</button>
       <p className="hint">Si acabas de registrarte, confirma tu correo antes de iniciar sesión. Revisa también spam o correo no deseado.</p>
@@ -770,20 +841,52 @@ function Dashboard({ profile, courses, history, setScreen }) {
 }
 
 function CoursesScreen({ courses, profile, onCreate, onSelect }) {
+  const [selected, setSelected] = useState('')
+  const [showNewCourse, setShowNewCourse] = useState(false)
   const [name, setName] = useState('')
+
+  async function createAndSelect() {
+    const created = await onCreate(name, { select: true })
+    if (created?.id) {
+      setSelected(created.id)
+      setName('')
+      setShowNewCourse(false)
+      onSelect(created.id)
+    }
+  }
+
+  function handleChange(value) {
+    if (value === '__new__') {
+      setShowNewCourse(true)
+      return
+    }
+    setSelected(value)
+    if (value) onSelect(value)
+  }
+
   return (
     <div className="page fade-in">
       <Header title="Cursos" subtitle={`${profile?.career?.name || 'Carrera'} · ${profile?.cycle?.name || 'Ciclo'}`} />
       <Card>
-        <h3>Crear curso para tu carrera y ciclo</h3>
-        <div className="form-row">
-          <input className="input" placeholder="Ejemplo: Desarrollo de Aplicaciones Móviles" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn primary" onClick={() => { onCreate(name); setName('') }}>➕ Crear</button>
-        </div>
-        <p className="hint">El curso será visible para otros alumnos de tu misma carrera y ciclo.</p>
+        <h3>Selecciona un curso</h3>
+        <p className="hint">Elige un curso activo de tu carrera y ciclo. Si no aparece, puedes agregarlo para que otros alumnos también lo encuentren.</p>
+        <select className="input" value={selected} onChange={(e) => handleChange(e.target.value)}>
+          <option value="">Selecciona tu curso</option>
+          {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
+          <option value="__new__">+ Agregar nuevo curso</option>
+        </select>
+        {showNewCourse && (
+          <div className="inline-new-course">
+            <input className="input" placeholder="Nombre del nuevo curso" value={name} onChange={(e) => setName(e.target.value)} />
+            <div className="action-row left">
+              <button className="btn primary small" onClick={createAndSelect}>➕ Agregar y usar</button>
+              <button className="btn ghost small" onClick={() => { setShowNewCourse(false); setName('') }}>Cancelar</button>
+            </div>
+          </div>
+        )}
       </Card>
       <div className="course-list">
-        {courses.length === 0 && <Empty text="Aún no hay cursos para tu carrera y ciclo. Crea el primero." />}
+        {courses.length === 0 && <Empty text="Aún no hay cursos activos para tu carrera y ciclo. Agrega el primero desde el combo." />}
         {courses.map((course) => (
           <Card key={course.id} className="course-card">
             <div>
@@ -798,7 +901,7 @@ function CoursesScreen({ courses, profile, onCreate, onSelect }) {
   )
 }
 
-function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode }) {
+function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode }) {
   const practices = EVALUATIONS.filter((e) => e.group === 'Prácticas calificadas')
   const exams = EVALUATIONS.filter((e) => e.group === 'Exámenes')
   const updateGrade = (key, value) => setGrades((prev) => ({ ...prev, [key]: value }))
@@ -807,14 +910,13 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
     <div className="page fade-in">
       <Header title={title} subtitle={subtitle} />
       {!guestMode && (
-        <Card>
-          <label className="label">Curso</label>
-          <select className="input" value={selectedCourseId} onChange={(e) => onSelectCourse(e.target.value)}>
-            <option value="">Selecciona un curso</option>
-            {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-          </select>
-          {activeCourse && <p className="hint">Calculando para: {activeCourse.name}</p>}
-        </Card>
+        <CourseCombo
+          courses={courses}
+          selectedCourseId={selectedCourseId}
+          onSelectCourse={onSelectCourse}
+          onCreateCourse={onCreateCourse}
+          activeCourse={activeCourse}
+        />
       )}
       <EvaluationSection title="Prácticas calificadas" items={practices} grades={grades} settings={settings} updateGrade={updateGrade} />
       <EvaluationSection title="Exámenes" items={exams} grades={grades} settings={settings} updateGrade={updateGrade} />
@@ -826,6 +928,51 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
       {onSave && <button className="btn secondary full" onClick={onSave}>💾 Guardar resultado</button>}
       {result && <ResultCard result={result} />}
     </div>
+  )
+}
+
+function CourseCombo({ courses, selectedCourseId, onSelectCourse, onCreateCourse, activeCourse }) {
+  const [showNewCourse, setShowNewCourse] = useState(false)
+  const [name, setName] = useState('')
+
+  async function createAndSelect() {
+    const created = await onCreateCourse(name, { select: true })
+    if (created?.id) {
+      setName('')
+      setShowNewCourse(false)
+    }
+  }
+
+  function handleChange(value) {
+    if (value === '__new__') {
+      setShowNewCourse(true)
+      return
+    }
+    setShowNewCourse(false)
+    onSelectCourse(value)
+  }
+
+  return (
+    <Card>
+      <label className="label">Curso</label>
+      <select className="input" value={selectedCourseId} onChange={(e) => handleChange(e.target.value)}>
+        <option value="">Selecciona tu curso</option>
+        {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
+        <option value="__new__">+ Agregar nuevo curso</option>
+      </select>
+      {activeCourse && <p className="hint">Calculando para: {activeCourse.name}</p>}
+      {courses.length === 0 && <p className="hint">No hay cursos activos para tu carrera y ciclo. Agrega uno nuevo desde el combo.</p>}
+      {showNewCourse && (
+        <div className="inline-new-course">
+          <input className="input" placeholder="Nombre del nuevo curso" value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="action-row left">
+            <button className="btn primary small" onClick={createAndSelect}>➕ Agregar y usar</button>
+            <button className="btn ghost small" onClick={() => { setShowNewCourse(false); setName('') }}>Cancelar</button>
+          </div>
+          <p className="hint">El curso se compartirá con estudiantes de tu misma carrera y ciclo.</p>
+        </div>
+      )}
+    </Card>
   )
 }
 

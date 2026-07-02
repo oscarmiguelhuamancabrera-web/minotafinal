@@ -207,3 +207,18 @@ Cambios:
 - Pantalla de completar perfil después de iniciar con Google.
 - Permisos RLS para completar perfil si Supabase Auth creó el usuario pero aún no existe el registro en `profiles`.
 - Botón visible en el dashboard para cambiar ciclo.
+
+## Cambios v1.0.3
+
+- El curso ahora se selecciona desde un combo filtrado por carrera y ciclo.
+- Si el curso no existe, se puede agregar desde la misma interfaz.
+- Si el administrador da de baja un curso, deja de mostrarse a estudiantes y se ocultan sus notas/historial en la vista del estudiante.
+- Se agregó tutorial inicial de primer uso.
+- Botón Google con estilo social.
+- Botón Microsoft agregado con mensaje “Disponible próximamente”.
+
+Ejecutar en Supabase antes de usar esta versión:
+
+```sql
+supabase/migration_v1_0_3_courses_tutorial_social.sql
+```
