@@ -157,8 +157,13 @@ function formatEnrollmentType(type) {
 }
 
 function creatorName(course) {
-  return course?.creator ? fullName(course.creator) : 'Sistema'
+  if (course?.creator) return fullName(course.creator)
+  if (course?.creator_name) return course.creator_name
+  return 'Sistema'
 }
+
+const COURSE_SELECT = 'id,name,created_by,status,cycle_id,career_id,faculty_id,university_id,evaluation_template_id,created_at,updated_at,university:universities(id,name,code),faculty:faculties(id,name),career:careers(id,name),cycle:cycles(id,name,order_number),evaluation_template:evaluation_templates(id,name,min_passing_grade)'
+const COURSE_SELECT_ADMIN = 'id,name,created_by,status,cycle_id,career_id,faculty_id,university_id,evaluation_template_id,created_at,updated_at,university:universities(id,name,code),faculty:faculties(id,name),career:careers(id,name),cycle:cycles(id,name,order_number),evaluation_template:evaluation_templates(id,name)'
 
 function universityName(item) {
   return item?.university?.name || 'Sin universidad'
@@ -445,16 +450,25 @@ function App() {
       return
     }
 
-    const officialRes = await supabase
+    let officialQuery = supabase
       .from('courses')
-      .select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name,min_passing_grade)')
+      .select(COURSE_SELECT)
       .eq('university_id', userProfile.university_id)
       .eq('faculty_id', userProfile.faculty_id)
       .eq('career_id', userProfile.career_id)
       .eq('status', 'active')
       .order('name')
 
-    const officialCourses = officialRes.error ? [] : (officialRes.data || [])
+    const officialRes = await officialQuery
+
+    if (officialRes.error) {
+      console.error('No se pudieron cargar cursos disponibles:', officialRes.error)
+      setAvailableCourses([])
+      setCourses([])
+      return
+    }
+
+    const officialCourses = officialRes.data || []
     const orderedOfficial = officialCourses.sort((a, b) => {
       const cycleDiff = Number(a.cycle?.order_number || 0) - Number(b.cycle?.order_number || 0)
       return cycleDiff || String(a.name).localeCompare(String(b.name), 'es')
@@ -468,7 +482,7 @@ function App() {
 
     const studentRes = await supabase
       .from('student_courses')
-      .select('id,enrollment_type,status,course_id,course:courses!inner(*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name,min_passing_grade))')
+      .select(`id,enrollment_type,status,course_id,course:courses!inner(${COURSE_SELECT})`)
       .eq('user_id', userProfile.id)
       .eq('status', 'visible')
       .eq('course.status', 'active')
@@ -835,7 +849,7 @@ function App() {
       cycle_id: targetCycleId,
       evaluation_template_id: getDefaultTemplateIdForProfile(profile),
       created_by: profile.id
-    }).select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name,min_passing_grade)').single()
+    }).select(COURSE_SELECT).single()
     if (error) {
       notify('error', 'No se pudo crear el curso. Puede que ya exista para tu carrera y ciclo.')
       return null
@@ -962,13 +976,13 @@ function App() {
   async function loadAdminData() {
     const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, templatesRes, componentsRes] = await Promise.all([
       supabase.from('profiles').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
-      supabase.from('courses').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name)').order('created_at', { ascending: false }),
+      supabase.from('courses').select(COURSE_SELECT_ADMIN).order('created_at', { ascending: false }),
       supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), evaluation_template:evaluation_templates(name)').order('created_at', { ascending: false }).limit(200),
       supabase.from('login_activity').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)').order('login_at', { ascending: false }).limit(300),
       supabase.from('student_courses').select('*, profile:profiles(first_name,last_name,email, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(500),
       supabase.from('universities').select('*').order('name'),
       supabase.from('faculties').select('*, university:universities(id,name,code)').order('name'),
-      supabase.from('evaluation_templates').select('*, university:universities(name,code), faculty:faculties(name), career:careers(name), course:courses(name), creator:profiles!evaluation_templates_created_by_fkey(first_name,last_name,email)').order('created_at', { ascending: false }),
+      supabase.from('evaluation_templates').select('*, university:universities(name,code), faculty:faculties(name), career:careers(name), course:courses(name)').order('created_at', { ascending: false }),
       supabase.from('evaluation_components').select('*').order('component_order')
     ])
 
@@ -1484,6 +1498,9 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
           </select>
         </div>
         {selectedAvailable && <p className="hint">Curso seleccionado: {selectedAvailable.name} · Creado por: {creatorName(selectedAvailable)}</p>}
+        {filteredAvailable.length === 0 && (
+          <p className="hint warning-hint">No hay cursos oficiales cargados para este contexto académico y ciclo. Puedes crear un curso no listado.</p>
+        )}
         <div className="action-row left">
           <button className="btn primary small" disabled={!courseId} onClick={addSelectedCourse}>➕ Agregar a Mis cursos</button>
           <button className="btn ghost small" onClick={() => setShowNewCourse(!showNewCourse)}>+ Crear curso no listado</button>
