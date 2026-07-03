@@ -1,4 +1,4 @@
-# Mi Nota Final Web/PWA v1.1.0
+# Mi Nota Final Web/PWA v1.1.1
 
 Versión de prueba multiuniversidad basada en la v1.0.6 validada.
 
@@ -43,3 +43,19 @@ VITE_SUPABASE_PUBLISHABLE_KEY=...
 ```
 
 No usar `SUPABASE_SECRET_KEY` en el frontend.
+
+
+## Versión 1.1.1 - Fix perfil multiuniversidad
+
+Cambios incluidos:
+- Completa tu perfil muestra Universidad → Facultad → Carrera → Ciclo.
+- Admin/superadmin no pasa por completar perfil académico.
+- Correo admin principal queda como superadmin sin universidad asignada.
+- Corrección RLS para `profile_academic_history`.
+- Corrección de `RAISE EXCEPTION` en plantilla de evaluación.
+
+Ejecutar en Supabase si ya corriste v1.1.0:
+
+```sql
+supabase/migration_v1_1_1_fix_perfil_multiuniversidad.sql
+```

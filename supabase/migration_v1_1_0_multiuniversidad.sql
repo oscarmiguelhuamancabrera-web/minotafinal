@@ -1,5 +1,5 @@
 -- ============================================================
--- MI NOTA FINAL WEB/PWA v1.1.0
+-- MI NOTA FINAL WEB/PWA v1.1.0 (corregido en paquete v1.1.1)
 -- MIGRACIÓN MULTIUNIVERSIDAD + EVALUACIONES CONFIGURABLES
 -- Base requerida: v1.0.6 validada
 -- Ejecutar en Supabase > SQL Editor > New query > Run
@@ -411,7 +411,7 @@ begin
     from public.evaluation_components
     where template_id = new.id and status = 'active';
     if abs(total - 100.00) > 0.01 then
-      raise exception 'El método de evaluación debe sumar 100%%. Actualmente suma: %%', total;
+      raise exception 'El método de evaluación debe sumar 100%%. Actualmente suma: %', total;
     end if;
   end if;
   return new;
@@ -645,6 +645,17 @@ CREATE POLICY "Usuario ve su historial academico" ON public.profile_academic_his
 FOR SELECT TO authenticated
 USING (user_id = auth.uid() OR public.is_admin());
 
+DROP POLICY IF EXISTS "Usuario o admin registra historial academico" ON public.profile_academic_history;
+CREATE POLICY "Usuario o admin registra historial academico" ON public.profile_academic_history
+FOR INSERT TO authenticated
+WITH CHECK (user_id = auth.uid() OR public.is_admin());
+
+DROP POLICY IF EXISTS "Admin gestiona historial academico" ON public.profile_academic_history;
+CREATE POLICY "Admin gestiona historial academico" ON public.profile_academic_history
+FOR ALL TO authenticated
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
 -- Plantillas
 DROP POLICY IF EXISTS "Plantillas visibles activas" ON public.evaluation_templates;
 CREATE POLICY "Plantillas visibles activas" ON public.evaluation_templates
@@ -717,3 +728,24 @@ from public.careers c
 join public.faculties f on f.id = c.faculty_id
 join public.universities u on u.id = f.university_id
 order by u.code, f.name, c.name;
+
+
+-- Admin/superadmin principal sin contexto académico obligatorio
+insert into public.admin_emails (email)
+select lower('oscar.miguel.huaman.cabrera@gmail.com')
+where exists (select 1 from information_schema.tables where table_schema='public' and table_name='admin_emails')
+  and not exists (
+    select 1 from public.admin_emails
+    where lower(email) = lower('oscar.miguel.huaman.cabrera@gmail.com')
+  );
+
+update public.profiles
+set role = 'superadmin',
+    status = 'active',
+    university_id = null,
+    faculty_id = null,
+    career_id = null,
+    current_cycle_id = null,
+    has_seen_tutorial = true,
+    updated_at = now()
+where lower(email) = lower('oscar.miguel.huaman.cabrera@gmail.com');

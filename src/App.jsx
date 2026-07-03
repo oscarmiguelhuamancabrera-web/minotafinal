@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.0'
+const APP_VERSION = '1.1.1'
 
 const emptyAuth = {
   firstName: '',
@@ -83,6 +83,7 @@ function formatStatus(status) {
 }
 
 function formatRole(role) {
+  if (role === 'superadmin') return 'Superadmin'
   if (role === 'admin') return 'Administrador'
   if (role === 'student') return 'Estudiante'
   return role || '—'
@@ -138,7 +139,7 @@ function buildProfileFromAuthUser(user) {
     first_name: first || '',
     last_name: last || '',
     full_name: `${first || ''} ${last || ''}`.trim(),
-    role: email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'student',
+    role: email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'superadmin' : 'student',
     status: 'active',
     university_id: metadata.university_id || null,
     faculty_id: metadata.faculty_id || null,
@@ -258,6 +259,10 @@ function App() {
     if (!error) setCycles(data || [])
   }
 
+  function isAdminRole(role) {
+    return role === 'admin' || role === 'superadmin'
+  }
+
   async function loadProfileAndData(user) {
     const { data: userProfile, error } = await supabase
       .from('profiles')
@@ -267,6 +272,45 @@ function App() {
 
     if (error || !userProfile) {
       const provisionalProfile = buildProfileFromAuthUser(user)
+
+      // Si el correo corresponde al administrador, no debe pasar por Completa tu perfil.
+      // Se crea/actualiza el perfil con universidad/facultad/carrera/ciclo en null.
+      if (isAdminRole(provisionalProfile.role)) {
+        const adminPayload = {
+          id: user.id,
+          email: provisionalProfile.email,
+          first_name: provisionalProfile.first_name || 'Administrador',
+          last_name: provisionalProfile.last_name || '',
+          full_name: provisionalProfile.full_name || provisionalProfile.email,
+          role: 'superadmin',
+          status: 'active',
+          university_id: null,
+          faculty_id: null,
+          career_id: null,
+          current_cycle_id: null,
+          has_seen_tutorial: true
+        }
+        const { data: savedAdmin, error: saveAdminError } = await supabase
+          .from('profiles')
+          .upsert(adminPayload, { onConflict: 'id' })
+          .select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name,faculty_id), cycle:cycles(id,name,order_number)')
+          .single()
+
+        if (saveAdminError) {
+          notify('error', getErrorMessage(saveAdminError))
+          setProfile(provisionalProfile)
+          setScreen('login')
+          return
+        }
+
+        const nextAdminProfile = savedAdmin || adminPayload
+        setProfile(nextAdminProfile)
+        await loadSettings(user.id)
+        await loadAdminData()
+        setScreen('admin-dashboard')
+        return
+      }
+
       setProfile(provisionalProfile)
       setCourses([])
       setAvailableCourses([])
@@ -281,28 +325,44 @@ function App() {
       return
     }
 
-    setProfile(userProfile)
+    const normalizedProfile = userProfile.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
+      ? { ...userProfile, role: 'superadmin', university_id: null, faculty_id: null, career_id: null, current_cycle_id: null }
+      : userProfile
 
-    if (isProfileIncomplete(userProfile)) {
+    if (userProfile.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() && userProfile.role !== 'superadmin') {
+      await supabase.from('profiles').update({
+        role: 'superadmin',
+        status: 'active',
+        university_id: null,
+        faculty_id: null,
+        career_id: null,
+        current_cycle_id: null,
+        updated_at: new Date().toISOString()
+      }).eq('id', userProfile.id)
+    }
+
+    setProfile(normalizedProfile)
+
+    if (isProfileIncomplete(normalizedProfile)) {
       await loadSettings(user.id)
       setScreen('complete-profile')
       return
     }
 
-    await Promise.all([loadSettings(user.id), loadCourses(userProfile), loadHistory(user.id)])
+    await Promise.all([loadSettings(user.id), loadCourses(normalizedProfile), loadHistory(user.id)])
 
     const key = `${user.id}-${todayISO()}`
     if (recordedLoginRef.current !== key) {
       recordedLoginRef.current = key
-      recordLoginActivity(userProfile)
+      recordLoginActivity(normalizedProfile)
     }
 
-    if (userProfile.role !== 'admin' && userProfile.has_seen_tutorial === false) {
+    if (!isAdminRole(normalizedProfile.role) && normalizedProfile.has_seen_tutorial === false) {
       setScreen('tutorial')
       return
     }
 
-    setScreen(userProfile.role === 'admin' ? 'admin-dashboard' : 'dashboard')
+    setScreen(isAdminRole(normalizedProfile.role) ? 'admin-dashboard' : 'dashboard')
   }
 
   async function recordLoginActivity(userProfile) {
@@ -808,22 +868,30 @@ function App() {
 
   async function handleUpdateProfile(values) {
     if (!session?.user) return
-    if (!values.firstName?.trim() || !values.lastName?.trim() || !values.universityId || !values.facultyId || !values.careerId || !values.cycleId) {
-      notify('error', 'Completa nombres, apellidos, universidad, facultad, carrera y ciclo.')
+    const email = session.user.email || profile?.email || ''
+    const nextRole = profile?.role || (email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'superadmin' : 'student')
+
+    if (!values.firstName?.trim() || !values.lastName?.trim()) {
+      notify('error', 'Completa nombres y apellidos.')
       return
     }
-    const email = session.user.email || profile?.email || ''
+
+    if (!isAdminRole(nextRole) && (!values.universityId || !values.facultyId || !values.careerId || !values.cycleId)) {
+      notify('error', 'Completa universidad, facultad, carrera y ciclo.')
+      return
+    }
+
     const payload = {
       id: session.user.id,
       email,
       first_name: values.firstName.trim(),
       last_name: values.lastName.trim(),
       full_name: `${values.firstName.trim()} ${values.lastName.trim()}`.trim(),
-      university_id: values.universityId,
-      faculty_id: values.facultyId,
-      career_id: values.careerId,
-      current_cycle_id: values.cycleId,
-      role: profile?.role || (email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'student'),
+      university_id: isAdminRole(nextRole) ? null : values.universityId,
+      faculty_id: isAdminRole(nextRole) ? null : values.facultyId,
+      career_id: isAdminRole(nextRole) ? null : values.careerId,
+      current_cycle_id: isAdminRole(nextRole) ? null : values.cycleId,
+      role: nextRole,
       status: profile?.status || 'active'
     }
     const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' })
@@ -1173,18 +1241,22 @@ function Register({ universities, faculties, careers, cycles, onSubmit, onBack }
         <input className="input" placeholder="Apellidos" value={form.lastName} onChange={(e) => update('lastName', e.target.value)} />
       </div>
       <input className="input" type="email" placeholder="Correo electrónico" value={form.email} onChange={(e) => update('email', e.target.value)} />
+      <label className="field-label">Universidad</label>
       <select className="input" value={form.universityId} onChange={(e) => update('universityId', e.target.value)}>
         <option value="">Selecciona tu universidad</option>
         {universities.map((university) => <option key={university.id} value={university.id}>{university.name}</option>)}
       </select>
+      <label className="field-label">Facultad</label>
       <select className="input" value={form.facultyId} onChange={(e) => update('facultyId', e.target.value)} disabled={!form.universityId}>
         <option value="">Selecciona tu facultad</option>
         {filteredFaculties.map((faculty) => <option key={faculty.id} value={faculty.id}>{faculty.name}</option>)}
       </select>
+      <label className="field-label">Carrera</label>
       <select className="input" value={form.careerId} onChange={(e) => update('careerId', e.target.value)} disabled={!form.facultyId}>
         <option value="">Selecciona tu carrera</option>
         {filteredCareers.map((career) => <option key={career.id} value={career.id}>{career.name}</option>)}
       </select>
+      <label className="field-label">Ciclo actual</label>
       <select className="input" value={form.cycleId} onChange={(e) => update('cycleId', e.target.value)}>
         <option value="">Selecciona tu ciclo</option>
         {cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
@@ -1622,18 +1694,22 @@ function ProfileForm({ profile, universities, faculties, careers, cycles, onSave
         <input className="input" placeholder="Apellidos" value={form.lastName} onChange={(e) => update('lastName', e.target.value)} />
       </div>
       {profile?.email && <input className="input" value={profile.email} disabled />}
+      <label className="field-label">Universidad</label>
       <select className="input" value={form.universityId} onChange={(e) => update('universityId', e.target.value)}>
         <option value="">Selecciona universidad</option>
         {(universities || []).map((university) => <option key={university.id} value={university.id}>{university.name}</option>)}
       </select>
+      <label className="field-label">Facultad</label>
       <select className="input" value={form.facultyId} onChange={(e) => update('facultyId', e.target.value)} disabled={!form.universityId}>
         <option value="">Selecciona facultad</option>
         {filteredFaculties.map((faculty) => <option key={faculty.id} value={faculty.id}>{faculty.name}</option>)}
       </select>
+      <label className="field-label">Carrera</label>
       <select className="input" value={form.careerId} onChange={(e) => update('careerId', e.target.value)} disabled={!form.facultyId}>
         <option value="">Selecciona carrera</option>
         {filteredCareers.map((career) => <option key={career.id} value={career.id}>{career.name}</option>)}
       </select>
+      <label className="field-label">Ciclo actual</label>
       <select className="input" value={form.cycleId} onChange={(e) => update('cycleId', e.target.value)}>
         <option value="">Selecciona ciclo</option>
         {(cycles || []).map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
