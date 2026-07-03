@@ -429,3 +429,92 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
     justify-content: center;
   }
 }
+
+/* Ajustes v1.0.6 - mis cursos, dashboard académico y administrador */
+.student-summary-list {
+  display: grid;
+  gap: 10px;
+}
+.student-summary-row,
+.student-course-card {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #eee7fb;
+  border-radius: 20px;
+  background: #fff;
+}
+.student-summary-row h3,
+.student-course-card h3 {
+  margin: 0 0 4px;
+  color: var(--purple-dark);
+}
+.student-summary-row p,
+.student-course-card p {
+  margin: 0;
+  font-size: .9rem;
+}
+.summary-status {
+  min-width: 110px;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--purple-soft);
+}
+.summary-status b {
+  color: var(--purple-dark);
+  font-size: 1.12rem;
+}
+.summary-status span {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 800;
+}
+.compact-actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+.admin-scroll-list,
+.recent-list {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.admin-scroll-list::-webkit-scrollbar,
+.recent-list::-webkit-scrollbar {
+  width: 6px;
+}
+.admin-scroll-list::-webkit-scrollbar-thumb,
+.recent-list::-webkit-scrollbar-thumb {
+  background: #c4a7ff;
+  border-radius: 999px;
+}
+.admin-scroll-list::-webkit-scrollbar-track,
+.recent-list::-webkit-scrollbar-track {
+  background: #f3ecff;
+  border-radius: 999px;
+}
+.btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+@media (max-width: 820px) {
+  .student-summary-row,
+  .student-course-card {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .summary-status {
+    justify-items: start;
+  }
+  .compact-actions {
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+}

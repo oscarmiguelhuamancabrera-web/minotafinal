@@ -14,7 +14,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.0.5'
+const APP_VERSION = '1.0.6'
 
 const emptyAuth = {
   firstName: '',
@@ -51,11 +51,66 @@ function fullName(profile) {
   return full || profile?.full_name || profile?.email || 'Sin nombre'
 }
 
+function splitFullName(fullName = '') {
+  const parts = String(fullName)
+    .trim()
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+
+  if (parts.length === 0) return { firstName: '', lastName: '' }
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' }
+  if (parts.length === 2) return { firstName: parts[0], lastName: parts[1] }
+  if (parts.length === 3) return { firstName: parts[0], lastName: parts.slice(1).join(' ') }
+  return {
+    firstName: parts.slice(0, 2).join(' '),
+    lastName: parts.slice(2).join(' ')
+  }
+}
+
+function formatStatus(status) {
+  if (status === 'active') return 'Activo'
+  if (status === 'inactive') return 'Inactivo'
+  if (status === 'visible') return 'Visible'
+  if (status === 'hidden') return 'Oculto'
+  return status || '—'
+}
+
+function formatRole(role) {
+  if (role === 'admin') return 'Administrador'
+  if (role === 'student') return 'Estudiante'
+  return role || '—'
+}
+
+function formatEnrollmentType(type) {
+  const labels = {
+    regular: 'Regular',
+    arrastrado: 'Arrastrado',
+    adelantado: 'Adelantado',
+    electivo: 'Electivo',
+    otro: 'Otro'
+  }
+  return labels[type] || 'Regular'
+}
+
+function creatorName(course) {
+  return course?.creator ? fullName(course.creator) : 'Sistema'
+}
+
+function courseCycleName(course) {
+  return course?.cycle?.name || 'Sin ciclo'
+}
+
+function latestHistoryForCourse(history, courseId) {
+  return (history || []).find((item) => item.course_id === courseId) || null
+}
+
 function buildProfileFromAuthUser(user) {
   const metadata = user?.user_metadata || {}
   const rawName = metadata.full_name || metadata.name || metadata.display_name || ''
-  const first = metadata.first_name || firstWord(rawName || user?.email?.split('@')[0])
-  const last = metadata.last_name || (rawName ? rawName.replace(/^\S+\s*/, '') : '')
+  const parsedName = splitFullName(rawName || user?.email?.split('@')[0] || '')
+  const first = metadata.given_name || metadata.first_name || parsedName.firstName || ''
+  const last = metadata.family_name || metadata.last_name || parsedName.lastName || ''
   const email = user?.email || ''
   return {
     id: user?.id,
@@ -100,6 +155,7 @@ function App() {
   const [cycles, setCycles] = useState([])
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [courses, setCourses] = useState([])
+  const [availableCourses, setAvailableCourses] = useState([])
   const [selectedCourseId, setSelectedCourseId] = useState('')
   const [grades, setGrades] = useState(emptyGrades())
   const [result, setResult] = useState(null)
@@ -125,6 +181,7 @@ function App() {
       } else {
         setProfile(null)
         setCourses([])
+        setAvailableCourses([])
         setHistory([])
         setSelectedCourseId('')
         if (!guestMode) setScreen('login')
@@ -171,6 +228,7 @@ function App() {
       const provisionalProfile = buildProfileFromAuthUser(user)
       setProfile(provisionalProfile)
       setCourses([])
+      setAvailableCourses([])
       setHistory([])
       setScreen('complete-profile')
       return
@@ -223,18 +281,57 @@ function App() {
   }
 
   async function loadCourses(userProfile = profile) {
-    if (!userProfile?.career_id || !userProfile?.current_cycle_id) {
+    if (!userProfile?.career_id) {
+      setCourses([])
+      setAvailableCourses([])
+      return
+    }
+
+    const officialRes = await supabase
+      .from('courses')
+      .select('*, career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email)')
+      .eq('career_id', userProfile.career_id)
+      .eq('status', 'active')
+      .order('name')
+
+    const officialCourses = officialRes.error ? [] : (officialRes.data || [])
+    const orderedOfficial = officialCourses.sort((a, b) => {
+      const cycleDiff = Number(a.cycle?.order_number || 0) - Number(b.cycle?.order_number || 0)
+      return cycleDiff || String(a.name).localeCompare(String(b.name), 'es')
+    })
+    setAvailableCourses(orderedOfficial)
+
+    if (!userProfile?.id) {
       setCourses([])
       return
     }
-    const { data, error } = await supabase
-      .from('courses')
-      .select('*, career:careers(name), cycle:cycles(name), creator:profiles!courses_created_by_fkey(first_name,last_name,email)')
-      .eq('career_id', userProfile.career_id)
-      .eq('cycle_id', userProfile.current_cycle_id)
-      .eq('status', 'active')
-      .order('name')
-    if (!error) setCourses(data || [])
+
+    const studentRes = await supabase
+      .from('student_courses')
+      .select('id,enrollment_type,status,course_id,course:courses!inner(*, career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email))')
+      .eq('user_id', userProfile.id)
+      .eq('status', 'visible')
+      .eq('course.status', 'active')
+
+    if (!studentRes.error) {
+      const myCourses = (studentRes.data || [])
+        .map((row) => ({
+          ...row.course,
+          student_course_id: row.id,
+          enrollment_type: row.enrollment_type || 'regular',
+          student_course_status: row.status || 'visible'
+        }))
+        .sort((a, b) => {
+          const cycleDiff = Number(a.cycle?.order_number || 0) - Number(b.cycle?.order_number || 0)
+          return cycleDiff || String(a.name).localeCompare(String(b.name), 'es')
+        })
+      setCourses(myCourses)
+      return
+    }
+
+    // Compatibilidad si aún no se ejecutó la migración student_courses.
+    const fallback = orderedOfficial.filter((course) => course.cycle_id === userProfile.current_cycle_id)
+    setCourses(fallback.map((course) => ({ ...course, enrollment_type: 'regular' })))
   }
 
   async function loadHistory(userId = session?.user?.id) {
@@ -366,6 +463,7 @@ function App() {
     setProfile(null)
     setSettings(loadGuestSettings())
     setCourses([])
+    setAvailableCourses([])
     setGrades(emptyGrades())
     setResult(null)
     setScreen('guest-calculator')
@@ -471,22 +569,89 @@ function App() {
       notify('error', 'Completa tu carrera y ciclo antes de crear cursos.')
       return null
     }
+    const targetCycleId = options.cycleId || profile.current_cycle_id
+    const enrollmentType = options.enrollmentType || 'regular'
     const { data, error } = await supabase.from('courses').insert({
       name: name.trim(),
       career_id: profile.career_id,
-      cycle_id: profile.current_cycle_id,
+      cycle_id: targetCycleId,
       created_by: profile.id
-    }).select('*, career:careers(name), cycle:cycles(name), creator:profiles!courses_created_by_fkey(first_name,last_name,email)').single()
+    }).select('*, career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email)').single()
     if (error) {
       notify('error', 'No se pudo crear el curso. Puede que ya exista para tu carrera y ciclo.')
       return null
     }
-    notify('success', 'Curso creado y disponible para tu carrera y ciclo.')
+    if (options.addToMyCourses !== false && data?.id) {
+      await handleAddStudentCourse(data.id, enrollmentType, { silent: true, select: options.select })
+    }
+    notify('success', 'Curso creado correctamente y agregado a tus cursos actuales.')
     await loadCourses()
     if (options.select && data?.id) {
       await loadCourseGrades(data.id)
     }
     return data
+  }
+
+  async function handleAddStudentCourse(courseId, enrollmentType = 'regular', options = {}) {
+    if (!session?.user || !courseId) {
+      notify('error', 'Selecciona un curso para agregarlo.')
+      return null
+    }
+    const payload = {
+      user_id: session.user.id,
+      course_id: courseId,
+      enrollment_type: enrollmentType,
+      status: 'visible',
+      updated_at: new Date().toISOString()
+    }
+    const { data, error } = await supabase
+      .from('student_courses')
+      .upsert(payload, { onConflict: 'user_id,course_id' })
+      .select('id')
+      .single()
+    if (error) {
+      notify('error', 'No se pudo agregar el curso a tu lista. Verifica que se haya ejecutado la migración 1.0.6.')
+      return null
+    }
+    if (!options.silent) notify('success', 'Curso agregado a Mis cursos actuales.')
+    await loadCourses()
+    if (options.select) await loadCourseGrades(courseId)
+    return data
+  }
+
+  async function handleHideStudentCourse(course) {
+    if (!session?.user || !course?.id) return
+    const targetId = course.student_course_id
+    let error = null
+    if (targetId) {
+      const result = await supabase
+        .from('student_courses')
+        .update({ status: 'hidden', updated_at: new Date().toISOString() })
+        .eq('id', targetId)
+        .eq('user_id', session.user.id)
+      error = result.error
+    } else {
+      const result = await supabase
+        .from('student_courses')
+        .upsert({
+          user_id: session.user.id,
+          course_id: course.id,
+          enrollment_type: course.enrollment_type || 'regular',
+          status: 'hidden',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,course_id' })
+      error = result.error
+    }
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Curso ocultado de tu página principal.')
+      if (selectedCourseId === course.id) {
+        setSelectedCourseId('')
+        setGrades(emptyGrades())
+        setResult(null)
+      }
+      await loadCourses()
+    }
   }
 
   async function handleUpdateProfile(values) {
@@ -516,18 +681,20 @@ function App() {
   }
 
   async function loadAdminData() {
-    const [profilesRes, coursesRes, calculationsRes, loginsRes] = await Promise.all([
+    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes] = await Promise.all([
       supabase.from('profiles').select('*, career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
       supabase.from('courses').select('*, career:careers(name), cycle:cycles(name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email)').order('created_at', { ascending: false }),
       supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id), course:courses(name, career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(200),
-      supabase.from('login_activity').select('*, profile:profiles(first_name,last_name,email), career:careers(name), cycle:cycles(name)').order('login_at', { ascending: false }).limit(300)
+      supabase.from('login_activity').select('*, profile:profiles(first_name,last_name,email), career:careers(name), cycle:cycles(name)').order('login_at', { ascending: false }).limit(300),
+      supabase.from('student_courses').select('*, profile:profiles(first_name,last_name,email, career:careers(name), cycle:cycles(name)), course:courses(name, career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(500)
     ])
 
     setAdminData({
       users: profilesRes.data || [],
       courses: coursesRes.data || [],
       calculations: calculationsRes.data || [],
-      logins: loginsRes.data || []
+      logins: loginsRes.data || [],
+      studentCourses: studentCoursesRes.data || []
     })
   }
 
@@ -631,8 +798,8 @@ function App() {
               />
             )}
             {guestMode && screen === 'guest-settings' && <SettingsScreen settings={settings} onSave={(s) => handleSaveSettings(s, true)} guestMode />}
-            {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} setScreen={setScreen} />}
-            {session && screen === 'courses' && <CoursesScreen courses={courses} profile={profile} onCreate={handleCreateCourse} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
+            {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
+            {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onHide={handleHideStudentCourse} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
               <CalculatorScreen
                 title="Calcular nota"
@@ -820,7 +987,7 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
   )
 }
 
-function Dashboard({ profile, courses, history, setScreen }) {
+function Dashboard({ profile, courses, history, setScreen, onSelectCourse }) {
   return (
     <div className="page fade-in">
       <div className="hero-panel">
@@ -831,16 +998,46 @@ function Dashboard({ profile, courses, history, setScreen }) {
         </div>
         <div className="hero-actions">
           <button className="btn secondary small" onClick={() => setScreen('profile')}>🔄 Cambiar ciclo</button>
-          <button className="btn primary small" onClick={() => setScreen('calculator')}>🧮 Calcular nota</button>
+          <button className="btn primary small" onClick={() => setScreen('calculator')}>🧮 Calcular</button>
         </div>
       </div>
       <div className="cards stats-grid">
-        <StatCard icon="📚" label="Cursos visibles" value={courses.length} />
+        <StatCard icon="📚" label="Mis cursos actuales" value={courses.length} />
         <StatCard icon="📊" label="Resultados guardados" value={history.length} />
         <StatCard icon="⚙️" label="Ciclo actual" value={profile?.cycle?.name || '—'} />
       </div>
+      <Card>
+        <div className="section-title">
+          <span>📌</span>
+          <h3>Resumen de tus notas</h3>
+          <button className="btn primary small" onClick={() => setScreen('calculator')}>Calcular</button>
+        </div>
+        {courses.length === 0 && (
+          <Empty text="Aún no agregaste cursos a tu lista. Entra a Cursos y agrega solo los que estás llevando." compact />
+        )}
+        {courses.length > 0 && (
+          <div className="student-summary-list">
+            {courses.map((course) => {
+              const latest = latestHistoryForCourse(history, course.id)
+              return (
+                <div className="student-summary-row" key={course.id}>
+                  <div>
+                    <h3>{course.name}</h3>
+                    <p>{courseCycleName(course)} · {formatEnrollmentType(course.enrollment_type)}</p>
+                  </div>
+                  <div className="summary-status">
+                    <b>{latest ? formatNumber(latest.current_average) : 'Pendiente'}</b>
+                    <span>{latest?.status || 'Sin notas'}</span>
+                  </div>
+                  <button className="btn secondary small" onClick={() => onSelectCourse(course.id)}>Calcular</button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
       <div className="grid two">
-        <ActionCard title="Mis cursos" text="Cursos compartidos por tu carrera y ciclo." button="Ver cursos" onClick={() => setScreen('courses')} />
+        <ActionCard title="Mis cursos" text="Agrega cursos regulares, arrastrados, adelantados, electivos u otros." button="Ver cursos" onClick={() => setScreen('courses')} />
         <ActionCard title="Historial" text="Revisa los cálculos que decidiste guardar." button="Ver historial" onClick={() => setScreen('history')} />
       </div>
       <Footer />
@@ -848,63 +1045,94 @@ function Dashboard({ profile, courses, history, setScreen }) {
   )
 }
 
-function CoursesScreen({ courses, profile, onCreate, onSelect }) {
-  const [selected, setSelected] = useState('')
+function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, onAdd, onHide, onSelect }) {
+  const [cycleId, setCycleId] = useState(profile?.current_cycle_id || '')
+  const [courseId, setCourseId] = useState('')
+  const [enrollmentType, setEnrollmentType] = useState('regular')
   const [showNewCourse, setShowNewCourse] = useState(false)
   const [name, setName] = useState('')
 
-  async function createAndSelect() {
-    const created = await onCreate(name, { select: true })
+  const filteredAvailable = (availableCourses || []).filter((course) => !cycleId || course.cycle_id === cycleId)
+  const selectedAvailable = filteredAvailable.find((course) => course.id === courseId)
+
+  async function addSelectedCourse() {
+    if (!courseId) return
+    const added = await onAdd(courseId, enrollmentType)
+    if (added) {
+      setCourseId('')
+      setEnrollmentType('regular')
+    }
+  }
+
+  async function createAndAdd() {
+    const created = await onCreate(name, { cycleId, enrollmentType, select: true })
     if (created?.id) {
-      setSelected(created.id)
       setName('')
       setShowNewCourse(false)
       onSelect(created.id)
     }
   }
 
-  function handleChange(value) {
-    if (value === '__new__') {
-      setShowNewCourse(true)
-      return
-    }
-    setSelected(value)
-    if (value) onSelect(value)
-  }
-
   return (
     <div className="page fade-in">
-      <Header title="Cursos" subtitle={`${profile?.career?.name || 'Carrera'} · ${profile?.cycle?.name || 'Ciclo'}`} />
+      <Header title="Mis cursos" subtitle={`${profile?.career?.name || 'Carrera'} · ${profile?.cycle?.name || 'Ciclo actual'}`} />
       <Card>
-        <h3>Selecciona un curso</h3>
-        <p className="hint">Elige un curso activo de tu carrera y ciclo. Si no aparece, puedes agregarlo para que otros alumnos también lo encuentren.</p>
-        <select className="input" value={selected} onChange={(e) => handleChange(e.target.value)}>
-          <option value="">Selecciona tu curso</option>
-          {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-          <option value="__new__">+ Agregar nuevo curso</option>
-        </select>
+        <h3>Agregar curso a mi lista</h3>
+        <p className="hint">Puedes agregar cursos de tu ciclo actual, cursos arrastrados, adelantados, electivos u otros. Tu página principal mostrará solo estos cursos.</p>
+        <div className="grid three">
+          <select className="input" value={cycleId} onChange={(e) => { setCycleId(e.target.value); setCourseId('') }}>
+            <option value="">Todos los ciclos</option>
+            {cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
+          </select>
+          <select className="input" value={courseId} onChange={(e) => setCourseId(e.target.value)}>
+            <option value="">Selecciona curso</option>
+            {filteredAvailable.map((course) => <option key={course.id} value={course.id}>{courseCycleName(course)} · {course.name}</option>)}
+          </select>
+          <select className="input" value={enrollmentType} onChange={(e) => setEnrollmentType(e.target.value)}>
+            <option value="regular">Regular</option>
+            <option value="arrastrado">Arrastrado</option>
+            <option value="adelantado">Adelantado</option>
+            <option value="electivo">Electivo</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+        {selectedAvailable && <p className="hint">Curso seleccionado: {selectedAvailable.name} · Creado por: {creatorName(selectedAvailable)}</p>}
+        <div className="action-row left">
+          <button className="btn primary small" disabled={!courseId} onClick={addSelectedCourse}>➕ Agregar a Mis cursos</button>
+          <button className="btn ghost small" onClick={() => setShowNewCourse(!showNewCourse)}>+ Crear curso no listado</button>
+        </div>
         {showNewCourse && (
           <div className="inline-new-course">
             <input className="input" placeholder="Nombre del nuevo curso" value={name} onChange={(e) => setName(e.target.value)} />
+            <p className="hint">Se creará para tu carrera y para el ciclo seleccionado. También quedará agregado a Mis cursos.</p>
             <div className="action-row left">
-              <button className="btn primary small" onClick={createAndSelect}>➕ Agregar y usar</button>
+              <button className="btn primary small" onClick={createAndAdd}>➕ Crear y usar</button>
               <button className="btn ghost small" onClick={() => { setShowNewCourse(false); setName('') }}>Cancelar</button>
             </div>
           </div>
         )}
       </Card>
-      <div className="course-list">
-        {courses.length === 0 && <Empty text="Aún no hay cursos activos para tu carrera y ciclo. Agrega el primero desde el combo." />}
-        {courses.map((course) => (
-          <Card key={course.id} className="course-card">
-            <div>
-              <h3>{course.name}</h3>
-              <p>Creado por: {course.creator ? fullName(course.creator) : 'Usuario'}</p>
+      <Card>
+        <div className="section-title">
+          <span>📚</span>
+          <h3>Mis cursos actuales</h3>
+        </div>
+        {courses.length === 0 && <Empty text="Aún no agregaste cursos. Usa el buscador superior para seleccionar solo los cursos que llevas." compact />}
+        <div className="course-list">
+          {courses.map((course) => (
+            <div key={course.id} className="student-course-card">
+              <div>
+                <h3>{course.name}</h3>
+                <p>{courseCycleName(course)} · <b>{formatEnrollmentType(course.enrollment_type)}</b> · Creado por: {creatorName(course)}</p>
+              </div>
+              <div className="action-row left compact-actions">
+                <button className="btn secondary small" onClick={() => onSelect(course.id)}>Calcular</button>
+                <button className="btn ghost small" onClick={() => onHide(course)}>Ocultar</button>
+              </div>
             </div>
-            <button className="btn secondary small" onClick={() => onSelect(course.id)}>Usar curso</button>
-          </Card>
-        ))}
-      </div>
+          ))}
+        </div>
+      </Card>
     </div>
   )
 }
@@ -969,7 +1197,7 @@ function CourseCombo({ courses, selectedCourseId, onSelectCourse, onCreateCourse
         <option value="__new__">+ Agregar nuevo curso</option>
       </select>
       {activeCourse && <p className="hint">Calculando para: {activeCourse.name}</p>}
-      {courses.length === 0 && <p className="hint">No hay cursos activos para tu carrera y ciclo. Agrega uno nuevo desde el combo.</p>}
+      {courses.length === 0 && <p className="hint">Aún no tienes cursos actuales. Agrega tus cursos desde la sección Cursos.</p>}
       {showNewCourse && (
         <div className="inline-new-course">
           <input className="input" placeholder="Nombre del nuevo curso" value={name} onChange={(e) => setName(e.target.value)} />
@@ -977,7 +1205,7 @@ function CourseCombo({ courses, selectedCourseId, onSelectCourse, onCreateCourse
             <button className="btn primary small" onClick={createAndSelect}>➕ Agregar y usar</button>
             <button className="btn ghost small" onClick={() => { setShowNewCourse(false); setName('') }}>Cancelar</button>
           </div>
-          <p className="hint">El curso se compartirá con estudiantes de tu misma carrera y ciclo.</p>
+          <p className="hint">El curso se compartirá con estudiantes de tu misma carrera y ciclo actual.</p>
         </div>
       )}
     </Card>
@@ -1137,7 +1365,7 @@ function CompleteProfile({ profile, careers, cycles, onSubmit }) {
       <Card className="complete-profile-card">
         <img className="mini-logo" src="/logo.png" alt="Mi Nota Final" />
         <h1>Completa tu perfil</h1>
-        <p className="muted">Antes de continuar, indica tu carrera y ciclo actual. Esto permitirá mostrarte solo los cursos que corresponden.</p>
+        <p className="muted">Antes de continuar, indica tu carrera y ciclo actual. Luego podrás agregar a tu lista los cursos que realmente estás llevando.</p>
         <ProfileForm profile={profile || {}} careers={careers} cycles={cycles} onSave={onSubmit} buttonText="Guardar y continuar" />
       </Card>
     </div>
@@ -1180,12 +1408,14 @@ function AdminDashboard({ data, onLoad, setScreen }) {
   const courses = data?.courses || []
   const calculations = data?.calculations || []
   const logins = data?.logins || []
+  const studentCourses = data?.studentCourses || []
   const todayLogins = logins.filter((login) => login.login_date === todayISO())
   const uniqueToday = new Set(todayLogins.map((login) => login.user_id)).size
   const hourly = groupByHour(todayLogins)
   const byCareer = countBy(users, (u) => u.career?.name || 'Sin carrera')
   const byCycle = countBy(users, (u) => u.cycle?.name || 'Sin ciclo')
   const distribution = buildDistribution(users, courses, calculations)
+  const byEnrollmentType = countBy(studentCourses.filter((item) => item.status === 'visible'), (item) => formatEnrollmentType(item.enrollment_type))
 
   return (
     <div className="page fade-in">
@@ -1195,13 +1425,15 @@ function AdminDashboard({ data, onLoad, setScreen }) {
         <StatCard icon="✅" label="Usuarios activos hoy" value={uniqueToday} />
         <StatCard icon="🔐" label="Accesos del día" value={todayLogins.length} />
         <StatCard icon="📚" label="Cursos creados" value={courses.length} />
+        <StatCard icon="🧾" label="Cursos en listas de alumnos" value={studentCourses.length} />
         <StatCard icon="📊" label="Cálculos guardados" value={calculations.length} />
       </div>
       <div className="grid two">
         <Card><h3>Accesos por hora de hoy</h3><BarChart data={hourly} /></Card>
         <Card><h3>Usuarios por carrera</h3><BarChart data={byCareer} /></Card>
         <Card><h3>Usuarios por ciclo</h3><BarChart data={byCycle} /></Card>
-        <Card><h3>Usuarios que iniciaron sesión hoy</h3><RecentLogins items={todayLogins.slice(0, 8)} /></Card>
+        <Card><h3>Cursos por tipo de matrícula</h3><BarChart data={byEnrollmentType} /></Card>
+        <Card><h3>Usuarios que iniciaron sesión hoy</h3><RecentLogins items={todayLogins} /></Card>
       </div>
       <Card>
         <h3>Distribución por carrera y ciclo</h3>
@@ -1224,7 +1456,7 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
     <div className="page fade-in">
       <Header title="Usuarios" subtitle="Ver, dar de baja, reactivar y cambiar rol." />
       <input className="input" placeholder="Buscar usuario o correo" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="admin-list">
+      <div className="admin-list admin-scroll-list">
         {users.map((user) => (
           <Card key={user.id}>
             <div className="list-row">
@@ -1232,7 +1464,7 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
                 <h3>{fullName(user)}</h3>
                 <p>{user.email} · {user.career?.name || 'Sin carrera'} · {user.cycle?.name || 'Sin ciclo'}</p>
               </div>
-              <span className={`badge ${user.status}`}>{user.status}</span>
+              <span className={`badge ${user.status}`}>{formatStatus(user.status)}</span>
             </div>
             <div className="action-row left">
               <button className="btn secondary small" onClick={() => onToggle(user)}>{user.status === 'active' ? 'Dar de baja' : 'Reactivar'}</button>
@@ -1249,7 +1481,7 @@ function AdminCourses({ data, onLoad, onUpdate }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState({ q: '', career: '', cycle: '' })
   const courses = (data?.courses || []).filter((course) => {
-    const matchesQ = `${course.name} ${fullName(course.creator || {})}`.toLowerCase().includes(filters.q.toLowerCase())
+    const matchesQ = `${course.name} ${creatorName(course)}`.toLowerCase().includes(filters.q.toLowerCase())
     const matchesCareer = !filters.career || course.career?.name === filters.career
     const matchesCycle = !filters.cycle || course.cycle?.name === filters.cycle
     return matchesQ && matchesCareer && matchesCycle
@@ -1264,7 +1496,7 @@ function AdminCourses({ data, onLoad, onUpdate }) {
         <select className="input" value={filters.career} onChange={(e) => setFilters({ ...filters, career: e.target.value })}><option value="">Todas las carreras</option>{careers.map((c) => <option key={c}>{c}</option>)}</select>
         <select className="input" value={filters.cycle} onChange={(e) => setFilters({ ...filters, cycle: e.target.value })}><option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c}>{c}</option>)}</select>
       </div>
-      <div className="admin-list">
+      <div className="admin-list admin-scroll-list">
         {courses.map((course) => <AdminCourseCard key={course.id} course={course} onUpdate={onUpdate} />)}
       </div>
     </div>
@@ -1279,9 +1511,9 @@ function AdminCourseCard({ course, onUpdate }) {
       <div className="list-row">
         <div>
           {editing ? <input className="input" value={name} onChange={(e) => setName(e.target.value)} /> : <h3>{course.name}</h3>}
-          <p>{course.career?.name || 'Sin carrera'} · {course.cycle?.name || 'Sin ciclo'} · Creado por: {course.creator ? fullName(course.creator) : 'Usuario'}</p>
+          <p>{course.career?.name || 'Sin carrera'} · {course.cycle?.name || 'Sin ciclo'} · Creado por: {creatorName(course)}</p>
         </div>
-        <span className={`badge ${course.status}`}>{course.status}</span>
+        <span className={`badge ${course.status}`}>{formatStatus(course.status)}</span>
       </div>
       <div className="action-row left">
         {editing ? <button className="btn primary small" onClick={() => { onUpdate(course.id, { name: name.trim() }); setEditing(false) }}>Guardar</button> : <button className="btn secondary small" onClick={() => setEditing(true)}>Editar nombre</button>}
@@ -1299,7 +1531,7 @@ function AdminCalculations({ data, onLoad }) {
     <div className="page fade-in">
       <Header title="Cálculos guardados" subtitle="Resultados guardados por los usuarios." />
       <input className="input" placeholder="Buscar por usuario, curso o estado" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="admin-list">
+      <div className="admin-list admin-scroll-list">
         {rows.map((item) => (
           <Card key={item.id}>
             <div className="list-row">
