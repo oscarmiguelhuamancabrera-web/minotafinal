@@ -1,61 +1,56 @@
-# Mi Nota Final Web/PWA v1.1.1
+# Mi Nota Final Web v1.1.2
 
-Versión de prueba multiuniversidad basada en la v1.0.6 validada.
+Versión de corrección sobre v1.1.1 multiuniversidad.
 
-## Cambios principales
+## Cambios incluidos
 
-- Registro y perfil con selección dependiente: Universidad → Facultad → Carrera → Ciclo.
-- UPSJB queda como universidad base para alumnos existentes.
-- El admin/superadmin queda sin universidad asignada por defecto.
-- El alumno puede cambiar universidad, facultad, carrera y ciclo desde Perfil.
-- Nueva estructura multiuniversidad con UPSJB y Universidad Autónoma de Ica.
-- Cursos filtrados por universidad y carrera del estudiante.
-- Métodos de evaluación configurables desde el administrador.
-- Plantilla UPSJB estándar: PC1, PC2, PC3, PC4, Parcial y Final.
-- Plantilla UAI por unidades: FK1, FK2, U1, FK1, FK2, U2, FK1, FK2, U3.
-- Calculadora flexible según la plantilla del curso/universidad.
-- Login mejorado: Enter en correo pasa a contraseña; Enter en contraseña ejecuta Ingresar.
+- Corrección definitiva de nombres duplicados desde Google.
+- Corrección de `full_name` y `name` duplicados en `auth.users.raw_user_meta_data` mediante script SQL.
+- Corrección de `first_name`, `last_name` y `full_name` en `public.profiles`.
+- Admin/superadmin ve cursos de todas las universidades.
+- Panel admin de cursos con filtros: universidad, facultad, carrera y ciclo.
+- Reasignación de cursos de Ingeniería de Sistemas UPSJB al contexto correcto:
+  - UPSJB
+  - Facultad de Ingenierías
+  - Ingeniería de Sistemas
+  - Ciclo correspondiente
+- Sincronización de `student_courses` con el contexto real del curso.
+- RLS corregido para catálogos, cursos y `profile_academic_history`.
 
-## Antes de probar
+## Script que debes ejecutar en Supabase
 
-Ejecutar en Supabase:
+Ejecutar antes de publicar o probar:
 
 ```text
-supabase/migration_v1_1_0_multiuniversidad.sql
+supabase/migration_v1_1_2_fix_google_names_admin_courses.sql
 ```
 
-## Local
+Ruta:
+
+```text
+Supabase → SQL Editor → New query → Run
+```
+
+## Publicar
 
 ```bash
-npm install
-npm run dev
+git status
+git add .
+git commit -m "Version 1.1.2 fix nombres Google y cursos admin"
+git push origin main
 ```
 
-## Producción
+Si la rama local es `master`:
 
-Subir a GitHub y esperar deploy en Vercel.
+```bash
+git push origin HEAD:main
+```
 
-Variables requeridas:
+## Variables requeridas en Vercel
 
 ```env
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_PUBLISHABLE_KEY=...
+VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=tu_publishable_key
 ```
 
-No usar `SUPABASE_SECRET_KEY` en el frontend.
-
-
-## Versión 1.1.1 - Fix perfil multiuniversidad
-
-Cambios incluidos:
-- Completa tu perfil muestra Universidad → Facultad → Carrera → Ciclo.
-- Admin/superadmin no pasa por completar perfil académico.
-- Correo admin principal queda como superadmin sin universidad asignada.
-- Corrección RLS para `profile_academic_history`.
-- Corrección de `RAISE EXCEPTION` en plantilla de evaluación.
-
-Ejecutar en Supabase si ya corriste v1.1.0:
-
-```sql
-supabase/migration_v1_1_1_fix_perfil_multiuniversidad.sql
-```
+No usar `SUPABASE_SECRET_KEY` en frontend.

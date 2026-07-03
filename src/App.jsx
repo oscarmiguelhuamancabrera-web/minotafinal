@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.1'
+const APP_VERSION = '1.1.2'
 
 const emptyAuth = {
   firstName: '',
@@ -57,10 +57,21 @@ function fullName(profile) {
   return full || profile?.full_name || profile?.email || 'Sin nombre'
 }
 
+function cleanText(value = '') {
+  return String(value || '').trim().replace(/\s+/g, ' ')
+}
+
+function removeLeadingDuplicateName(fullName = '') {
+  const parts = cleanText(fullName).split(' ').filter(Boolean)
+  if (parts.length >= 2 && parts[0].toLowerCase() === parts[1].toLowerCase()) {
+    return parts.slice(1).join(' ')
+  }
+  return cleanText(fullName)
+}
+
 function splitFullName(fullName = '') {
-  const parts = String(fullName)
-    .trim()
-    .replace(/\s+/g, ' ')
+  const normalized = removeLeadingDuplicateName(fullName)
+  const parts = normalized
     .split(' ')
     .filter(Boolean)
 
@@ -71,6 +82,51 @@ function splitFullName(fullName = '') {
   return {
     firstName: parts.slice(0, 2).join(' '),
     lastName: parts.slice(2).join(' ')
+  }
+}
+
+function getGoogleProfileName(metadata = {}, fallbackEmail = '') {
+  const givenName = cleanText(metadata.given_name || metadata.first_name || '')
+  const familyName = cleanText(metadata.family_name || metadata.last_name || '')
+  const rawFullName = cleanText(
+    metadata.full_name ||
+    metadata.name ||
+    metadata.display_name ||
+    `${givenName} ${familyName}` ||
+    fallbackEmail.split('@')[0] ||
+    ''
+  )
+  const fullName = removeLeadingDuplicateName(rawFullName)
+  const parsed = splitFullName(fullName)
+
+  const familyLooksLikeFullName = Boolean(
+    familyName &&
+    givenName &&
+    familyName.toLowerCase().startsWith(`${givenName.toLowerCase()} `)
+  )
+
+  const familyEqualsFullName = Boolean(
+    familyName &&
+    fullName &&
+    familyName.toLowerCase() === fullName.toLowerCase()
+  )
+
+  const givenLooksDuplicated = Boolean(
+    givenName &&
+    fullName.toLowerCase().startsWith(`${givenName.toLowerCase()} ${givenName.toLowerCase()} `)
+  )
+
+  if (givenName && familyName && !familyLooksLikeFullName && !familyEqualsFullName && !givenLooksDuplicated) {
+    return {
+      firstName: removeLeadingDuplicateName(givenName),
+      lastName: removeLeadingDuplicateName(familyName),
+      fullName: cleanText(`${givenName} ${familyName}`)
+    }
+  }
+
+  return {
+    ...parsed,
+    fullName
   }
 }
 
@@ -128,17 +184,16 @@ function latestHistoryForCourse(history, courseId) {
 
 function buildProfileFromAuthUser(user) {
   const metadata = user?.user_metadata || {}
-  const rawName = metadata.full_name || metadata.name || metadata.display_name || ''
-  const parsedName = splitFullName(rawName || user?.email?.split('@')[0] || '')
-  const first = metadata.given_name || metadata.first_name || parsedName.firstName || ''
-  const last = metadata.family_name || metadata.last_name || parsedName.lastName || ''
   const email = user?.email || ''
+  const parsedName = getGoogleProfileName(metadata, email)
+  const first = parsedName.firstName || ''
+  const last = parsedName.lastName || ''
   return {
     id: user?.id,
     email,
-    first_name: first || '',
-    last_name: last || '',
-    full_name: `${first || ''} ${last || ''}`.trim(),
+    first_name: first,
+    last_name: last,
+    full_name: parsedName.fullName || `${first} ${last}`.trim(),
     role: email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'superadmin' : 'student',
     status: 'active',
     university_id: metadata.university_id || null,
@@ -394,6 +449,7 @@ function App() {
       .from('courses')
       .select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name,min_passing_grade)')
       .eq('university_id', userProfile.university_id)
+      .eq('faculty_id', userProfile.faculty_id)
       .eq('career_id', userProfile.career_id)
       .eq('status', 'active')
       .order('name')
@@ -800,13 +856,14 @@ function App() {
       notify('error', 'Selecciona un curso para agregarlo.')
       return null
     }
+    const selectedCourse = availableCourses.find((c) => c.id === courseId) || courses.find((c) => c.id === courseId) || {}
     const payload = {
       user_id: session.user.id,
       course_id: courseId,
-      university_id: profile?.university_id || null,
-      faculty_id: profile?.faculty_id || null,
-      career_id: profile?.career_id || null,
-      cycle_id: (availableCourses.find((c) => c.id === courseId)?.cycle_id || courses.find((c) => c.id === courseId)?.cycle_id || null),
+      university_id: selectedCourse.university_id || profile?.university_id || null,
+      faculty_id: selectedCourse.faculty_id || profile?.faculty_id || null,
+      career_id: selectedCourse.career_id || profile?.career_id || null,
+      cycle_id: selectedCourse.cycle_id || null,
       enrollment_type: enrollmentType,
       status: 'visible',
       updated_at: new Date().toISOString()
@@ -1841,23 +1898,49 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
 
 function AdminCourses({ data, onLoad, onUpdate }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const [filters, setFilters] = useState({ q: '', career: '', cycle: '' })
-  const courses = (data?.courses || []).filter((course) => {
-    const matchesQ = `${course.name} ${creatorName(course)}`.toLowerCase().includes(filters.q.toLowerCase())
+  const [filters, setFilters] = useState({ q: '', university: '', faculty: '', career: '', cycle: '' })
+  const allCourses = data?.courses || []
+  const universities = unique(allCourses.map((c) => c.university?.code || c.university?.name).filter(Boolean))
+  const faculties = unique(allCourses
+    .filter((c) => !filters.university || (c.university?.code || c.university?.name) === filters.university)
+    .map((c) => c.faculty?.name)
+    .filter(Boolean))
+  const careers = unique(allCourses
+    .filter((c) => !filters.university || (c.university?.code || c.university?.name) === filters.university)
+    .filter((c) => !filters.faculty || c.faculty?.name === filters.faculty)
+    .map((c) => c.career?.name)
+    .filter(Boolean))
+  const cycles = unique(allCourses.map((c) => c.cycle?.name).filter(Boolean))
+
+  const courses = allCourses.filter((course) => {
+    const contextText = `${course.name} ${creatorName(course)} ${course.university?.code || ''} ${course.faculty?.name || ''} ${course.career?.name || ''} ${course.cycle?.name || ''}`.toLowerCase()
+    const matchesQ = contextText.includes(filters.q.toLowerCase())
+    const matchesUniversity = !filters.university || (course.university?.code || course.university?.name) === filters.university
+    const matchesFaculty = !filters.faculty || course.faculty?.name === filters.faculty
     const matchesCareer = !filters.career || course.career?.name === filters.career
     const matchesCycle = !filters.cycle || course.cycle?.name === filters.cycle
-    return matchesQ && matchesCareer && matchesCycle
+    return matchesQ && matchesUniversity && matchesFaculty && matchesCareer && matchesCycle
   })
-  const careers = unique((data?.courses || []).map((c) => c.career?.name).filter(Boolean))
-  const cycles = unique((data?.courses || []).map((c) => c.cycle?.name).filter(Boolean))
+
   return (
     <div className="page fade-in">
       <Header title="Cursos" subtitle="Editar nombres, ver creador y dar de baja cursos." />
-      <div className="filters">
-        <input className="input" placeholder="Buscar curso o creador" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
-        <select className="input" value={filters.career} onChange={(e) => setFilters({ ...filters, career: e.target.value })}><option value="">Todas las carreras</option>{careers.map((c) => <option key={c}>{c}</option>)}</select>
-        <select className="input" value={filters.cycle} onChange={(e) => setFilters({ ...filters, cycle: e.target.value })}><option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c}>{c}</option>)}</select>
+      <div className="filters admin-course-filters">
+        <input className="input" placeholder="Buscar curso, creador o contexto" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+        <select className="input" value={filters.university} onChange={(e) => setFilters({ ...filters, university: e.target.value, faculty: '', career: '' })}>
+          <option value="">Todas las universidades</option>{universities.map((u) => <option key={u}>{u}</option>)}
+        </select>
+        <select className="input" value={filters.faculty} onChange={(e) => setFilters({ ...filters, faculty: e.target.value, career: '' })}>
+          <option value="">Todas las facultades</option>{faculties.map((f) => <option key={f}>{f}</option>)}
+        </select>
+        <select className="input" value={filters.career} onChange={(e) => setFilters({ ...filters, career: e.target.value })}>
+          <option value="">Todas las carreras</option>{careers.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        <select className="input" value={filters.cycle} onChange={(e) => setFilters({ ...filters, cycle: e.target.value })}>
+          <option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c}>{c}</option>)}
+        </select>
       </div>
+      {courses.length === 0 && <Empty text="No hay cursos para los filtros seleccionados. Revisa que se haya ejecutado la migración v1.1.2." compact />}
       <div className="admin-list admin-scroll-list">
         {courses.map((course) => <AdminCourseCard key={course.id} course={course} onUpdate={onUpdate} />)}
       </div>
@@ -1873,7 +1956,7 @@ function AdminCourseCard({ course, onUpdate }) {
       <div className="list-row">
         <div>
           {editing ? <input className="input" value={name} onChange={(e) => setName(e.target.value)} /> : <h3>{course.name}</h3>}
-          <p>{course.career?.name || 'Sin carrera'} · {course.cycle?.name || 'Sin ciclo'} · Creado por: {creatorName(course)}</p>
+          <p>{course.university?.code || 'Sin universidad'} · {course.faculty?.name || 'Sin facultad'} · {course.career?.name || 'Sin carrera'} · {course.cycle?.name || 'Sin ciclo'} · Creado por: {creatorName(course)}</p>
         </div>
         <span className={`badge ${course.status}`}>{formatStatus(course.status)}</span>
       </div>
