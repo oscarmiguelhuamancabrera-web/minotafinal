@@ -1,27 +1,40 @@
-# Mi Nota Final Web v1.1.4 - Selector de calculadora por universidad
+# Mi Nota Final Web v1.1.5
 
-Versión basada en v1.1.3.
+Versión: `MiNotaFinalWeb_v1_1_5_logica_calculadora_ajustes`
 
 ## Cambios principales
 
-- Corrige el error `PGRST201` al cargar cursos con `evaluation_templates`.
-- Usa relación explícita: `evaluation_templates!courses_evaluation_template_id_fkey`.
-- Agrega selector de plantilla/calculadora en la calculadora.
-- El modo invitado permite elegir calculadora por universidad.
-- Los porcentajes no están fijos en el frontend: se cargan desde `evaluation_templates` y `evaluation_components`.
-- UPSJB y UAI usan sus plantillas configurables activas.
-- Mantiene carga de cursos por universidad, facultad, carrera y ciclo.
-- Incluye `supabase/migration_v1_1_4_fix_template_selector.sql`.
+- Calculadora automática según universidad/curso para alumnos registrados.
+- Selector de calculadora solo para admin/superadmin e invitado.
+- Ajustes con la misma lógica que la calculadora:
+  - Alumno: usa la plantilla de su universidad/curso.
+  - Admin/superadmin: puede seleccionar plantilla y editar porcentajes globales.
+  - Invitado: puede seleccionar plantilla y ajustar porcentajes localmente.
+- Porcentajes cargados desde `evaluation_templates` y `evaluation_components`.
+- Admin Dashboard: filtros en “Distribución por carrera y ciclo”.
+- Mis cursos actuales se filtra por el ciclo seleccionado.
+- Incluye carga de malla UAI Medicina Humana de I a XIV ciclo.
+- Mantiene fix de relación explícita de `evaluation_templates!courses_evaluation_template_id_fkey`.
+
+## SQL requerido
+
+Ejecutar en Supabase:
+
+```text
+supabase/migration_v1_1_5_logica_calculadora_ajustes.sql
+```
 
 ## Publicación
-
-1. Ejecutar SQL en Supabase.
-2. Subir a GitHub.
-3. Esperar deploy en Vercel.
 
 ```bash
 git status
 git add .
-git commit -m "Version 1.1.4 selector calculadora universidad"
+git commit -m "Version 1.1.5 logica calculadora y ajustes por universidad"
 git push origin main
+```
+
+Si tu rama local está como `master`:
+
+```bash
+git push origin HEAD:main
 ```

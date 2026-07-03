@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.4'
+const APP_VERSION = '1.1.5'
 
 const emptyAuth = {
   firstName: '',
@@ -260,8 +260,31 @@ function App() {
   const activeCourse = courses.find((course) => course.id === selectedCourseId) || null
   const greetingName = firstWord(profile?.first_name || profile?.full_name)
 
-  function getDefaultTemplateIdForProfile() {
-    return null
+  function findBestTemplateForContext(context = {}, course = null, templates = evaluationTemplates) {
+    const candidates = (templates || []).filter((template) => {
+      if (template.status && template.status !== 'active') return false
+      if (template.course_id && course?.id && template.course_id !== course.id) return false
+      if (template.course_id && !course?.id) return false
+      if (template.university_id && context?.university_id && template.university_id !== context.university_id) return false
+      if (template.university_id && !context?.university_id) return false
+      if (template.faculty_id && context?.faculty_id && template.faculty_id !== context.faculty_id) return false
+      if (template.career_id && context?.career_id && template.career_id !== context.career_id) return false
+      return true
+    })
+
+    return candidates
+      .sort((a, b) => {
+        const score = (template) =>
+          (template.course_id ? 8 : 0) +
+          (template.career_id ? 4 : 0) +
+          (template.faculty_id ? 2 : 0) +
+          (template.university_id ? 1 : 0)
+        return score(b) - score(a)
+      })[0] || null
+  }
+
+  function getDefaultTemplateIdForProfile(userProfile = profile, course = null) {
+    return findBestTemplateForContext(course || userProfile || {}, course, evaluationTemplates)?.id || null
   }
 
   useEffect(() => {
@@ -374,10 +397,10 @@ function App() {
 
   function templatesForCurrentCalculator() {
     const templates = evaluationTemplates || []
-    if (guestMode) return templates
+    if (guestMode || isAdmin) return templates
 
     const context = activeCourse || profile
-    if (!context?.university_id) return templates
+    if (!context?.university_id) return []
 
     return templates.filter((template) => {
       const matchesUniversity = !template.university_id || template.university_id === context.university_id
@@ -479,6 +502,12 @@ function App() {
     }
 
     await Promise.all([loadSettings(user.id), loadCourses(normalizedProfile), loadHistory(user.id)])
+
+    if (!isAdminRole(normalizedProfile.role)) {
+      const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
+      const defaultTemplate = findBestTemplateForContext(normalizedProfile, null, templates)
+      if (defaultTemplate?.id) await applyEvaluationTemplate(defaultTemplate.id)
+    }
 
     const key = `${user.id}-${todayISO()}`
     if (recordedLoginRef.current !== key) {
@@ -911,6 +940,75 @@ function App() {
     }
   }
 
+  async function handleSaveTemplateSettings(payload = {}) {
+    const components = payload.components || []
+    const total = components.reduce((sum, item) => sum + Number(item.weight_percent || 0), 0)
+    if (Math.abs(total - 100) > 0.01) {
+      notify('error', 'La suma de porcentajes debe ser 100%.')
+      return
+    }
+
+    const nextTemplate = {
+      ...(evaluationTemplate || {}),
+      min_passing_grade: Number(payload.minPassingGrade || evaluationTemplate?.min_passing_grade || settings.minimum_grade)
+    }
+    const nextItems = normalizeEvaluationComponents(components.map((component, index) => ({
+      ...component,
+      component_order: component.component_order || index + 1,
+      weight_percent: Number(component.weight_percent || 0),
+      status: 'active'
+    })), settings)
+
+    if (isAdmin && payload.templateId) {
+      const { error: templateError } = await supabase
+        .from('evaluation_templates')
+        .update({ min_passing_grade: nextTemplate.min_passing_grade, updated_at: new Date().toISOString() })
+        .eq('id', payload.templateId)
+      if (templateError) {
+        notify('error', getErrorMessage(templateError))
+        return
+      }
+      for (const component of components) {
+        if (!component.id) continue
+        const { error } = await supabase
+          .from('evaluation_components')
+          .update({
+            short_name: component.short_name,
+            name: component.name,
+            unit_name: component.unit_name || null,
+            weight_percent: Number(component.weight_percent || 0),
+            component_order: Number(component.component_order || 1),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', component.id)
+        if (error) {
+          notify('error', getErrorMessage(error))
+          return
+        }
+      }
+      notify('success', 'Plantilla actualizada correctamente.')
+      await loadEvaluationTemplates()
+      await applyEvaluationTemplate(payload.templateId)
+      if (adminData) await loadAdminData()
+      return
+    }
+
+    setEvaluationTemplate(nextTemplate)
+    setEvaluationItems(nextItems)
+    setGrades((prev) => {
+      const empty = emptyDynamicGrades(nextItems)
+      Object.keys(empty).forEach((key) => { if (prev[key] !== undefined) empty[key] = prev[key] })
+      return empty
+    })
+    setResult(null)
+    if (guestMode) {
+      localStorage.setItem('mnf_guest_template_override', JSON.stringify({ templateId: payload.templateId, minPassingGrade: nextTemplate.min_passing_grade, components }))
+      notify('success', 'Ajustes aplicados localmente en modo invitado.')
+    } else {
+      notify('success', 'Ajustes aplicados para esta sesión.')
+    }
+  }
+
   async function handleCreateCourse(name, options = {}) {
     if (!name.trim()) {
       notify('error', 'Ingresa el nombre del curso.')
@@ -1235,9 +1333,23 @@ function App() {
                 evaluationItems={evaluationItems}
                 evaluationTemplates={evaluationTemplates}
                 onSelectTemplate={applyEvaluationTemplate}
+                allowTemplateSelection
               />
             )}
-            {guestMode && screen === 'guest-settings' && <SettingsScreen settings={settings} onSave={(s) => handleSaveSettings(s, true)} guestMode />}
+            {guestMode && screen === 'guest-settings' && (
+              <SettingsScreen
+                settings={settings}
+                guestMode
+                isAdmin={false}
+                profile={profile}
+                evaluationTemplate={evaluationTemplate}
+                evaluationItems={evaluationItems}
+                evaluationTemplates={evaluationTemplates}
+                onSelectTemplate={applyEvaluationTemplate}
+                onSaveTemplate={handleSaveTemplateSettings}
+                allowTemplateSelection
+              />
+            )}
             {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onHide={handleHideStudentCourse} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
@@ -1261,10 +1373,24 @@ function App() {
                 evaluationItems={evaluationItems}
                 evaluationTemplates={templatesForCurrentCalculator()}
                 onSelectTemplate={applyEvaluationTemplate}
+                allowTemplateSelection={isAdmin}
               />
             )}
             {session && screen === 'history' && <HistoryScreen history={history} />}
-            {session && screen === 'settings' && <SettingsScreen settings={settings} onSave={handleSaveSettings} />}
+            {session && screen === 'settings' && (
+              <SettingsScreen
+                settings={settings}
+                guestMode={false}
+                isAdmin={isAdmin}
+                profile={profile}
+                evaluationTemplate={evaluationTemplate}
+                evaluationItems={evaluationItems}
+                evaluationTemplates={isAdmin ? evaluationTemplates : templatesForCurrentCalculator()}
+                onSelectTemplate={applyEvaluationTemplate}
+                onSaveTemplate={handleSaveTemplateSettings}
+                allowTemplateSelection={isAdmin}
+              />
+            )}
             {session && screen === 'profile' && <ProfileScreen profile={profile} universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSave={handleUpdateProfile} />}
             {screen === 'about' && <About />}
             {screen === 'more' && <MoreScreen isAdmin={isAdmin} guestMode={guestMode} setScreen={setScreen} onSignOut={async () => { setGuestMode(false); await supabase.auth.signOut() }} />}
@@ -1539,6 +1665,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   const [name, setName] = useState('')
 
   const filteredAvailable = (availableCourses || []).filter((course) => !cycleId || course.cycle_id === cycleId)
+  const filteredCurrentCourses = (courses || []).filter((course) => !cycleId || course.cycle_id === cycleId)
   const selectedAvailable = filteredAvailable.find((course) => course.id === courseId)
 
   async function addSelectedCourse() {
@@ -1626,7 +1753,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   )
 }
 
-function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate }) {
+function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate, allowTemplateSelection = false }) {
   const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
   const groups = [...new Set(items.map((item) => item.group || 'Evaluaciones'))]
   const updateGrade = (key, value) => setGrades((prev) => ({ ...prev, [key]: value }))
@@ -1634,7 +1761,7 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
   return (
     <div className="page fade-in">
       <Header title={title} subtitle={subtitle} />
-      {evaluationTemplates.length > 0 && (
+      {allowTemplateSelection && evaluationTemplates.length > 0 && (
         <EvaluationTemplateCombo
           templates={evaluationTemplates}
           selectedTemplateId={evaluationTemplate?.id || ''}
@@ -1803,33 +1930,81 @@ function HistoryScreen({ history }) {
   )
 }
 
-function SettingsScreen({ settings, onSave, guestMode }) {
-  const [form, setForm] = useState(settings)
-  useEffect(() => setForm(settings), [settings])
-  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }))
-  const total = EVALUATIONS.reduce((sum, item) => sum + Number(form[item.percentKey] || 0), 0)
+function SettingsScreen({ settings, guestMode, isAdmin, profile, evaluationTemplate, evaluationItems = [], evaluationTemplates = [], onSelectTemplate, onSaveTemplate, allowTemplateSelection = false }) {
+  const [templateId, setTemplateId] = useState(evaluationTemplate?.id || '')
+  const [minPassingGrade, setMinPassingGrade] = useState(evaluationTemplate?.min_passing_grade || settings.minimum_grade)
+  const [components, setComponents] = useState([])
+
+  useEffect(() => {
+    setTemplateId(evaluationTemplate?.id || '')
+    setMinPassingGrade(evaluationTemplate?.min_passing_grade || settings.minimum_grade)
+    setComponents((evaluationItems || []).map((item, index) => ({
+      id: item.id,
+      key: item.key,
+      short_name: item.shortName || item.label,
+      name: item.name || item.label,
+      unit_name: item.group || '',
+      weight_percent: item.percent,
+      component_order: item.order || index + 1
+    })))
+  }, [evaluationTemplate, evaluationItems, settings.minimum_grade])
+
+  function updateComponent(index, key, value) {
+    setComponents((prev) => prev.map((item, i) => i === index ? { ...item, [key]: value } : item))
+  }
+
+  async function handleTemplateChange(value) {
+    setTemplateId(value)
+    if (value) await onSelectTemplate?.(value)
+  }
+
+  const total = components.reduce((sum, item) => sum + Number(item.weight_percent || 0), 0)
+  const title = guestMode ? 'Ajustes de invitado' : 'Ajustes'
+  const subtitle = guestMode
+    ? 'Elige una calculadora y ajusta porcentajes solo en este navegador.'
+    : isAdmin
+      ? 'Selecciona una plantilla y configura sus porcentajes globales.'
+      : 'Porcentajes de la plantilla correspondiente a tu universidad.'
+
   return (
     <div className="page fade-in">
-      <Header title="Ajustes" subtitle={guestMode ? 'Configuración local del modo invitado.' : 'Porcentajes generales para tus cursos.'} />
+      <Header title={title} subtitle={subtitle} />
       <Card>
-        <div className="section-title"><span>⚙️</span><h3>Porcentajes</h3><b className={Math.abs(total - 100) < 0.001 ? 'ok' : 'bad'}>Total: {formatPercent(total)}%</b></div>
+        {allowTemplateSelection && (
+          <>
+            <label className="label">Plantilla de evaluación</label>
+            <select className="input" value={templateId} onChange={(e) => handleTemplateChange(e.target.value)}>
+              <option value="">Selecciona una plantilla</option>
+              {evaluationTemplates.map((template) => (
+                <option key={template.id} value={template.id}>{template.university?.code || 'General'} · {template.name}</option>
+              ))}
+            </select>
+          </>
+        )}
+        {!allowTemplateSelection && (
+          <p className="hint"><b>Plantilla activa:</b> {evaluationTemplate?.name || 'No configurada'} · <b>Contexto:</b> {academicContext(profile)}</p>
+        )}
+        <div className="section-title"><span>⚙️</span><h3>Componentes y porcentajes</h3><b className={Math.abs(total - 100) < 0.01 ? 'ok' : 'bad'}>Total: {formatPercent(total)}%</b></div>
+        {components.length === 0 && <Empty text="No hay componentes cargados para esta plantilla." compact />}
         <div className="settings-grid">
-          {EVALUATIONS.map((item) => (
-            <label className="setting-card" key={item.key}>
-              <span>{item.label}</span>
-              <input className="input" inputMode="decimal" value={form[item.percentKey]} onChange={(e) => update(item.percentKey, e.target.value)} />
+          {components.map((item, index) => (
+            <label className="setting-card" key={item.id || item.key || index}>
+              <span>{item.short_name || item.name}</span>
+              {(isAdmin || guestMode) && <input className="input" value={item.name || ''} onChange={(e) => updateComponent(index, 'name', e.target.value)} placeholder="Nombre" />}
+              <input className="input" inputMode="decimal" value={item.weight_percent ?? ''} onChange={(e) => updateComponent(index, 'weight_percent', e.target.value)} disabled={!isAdmin && !guestMode} />
             </label>
           ))}
         </div>
         <label className="setting-card wide">
           <span>Nota mínima aprobatoria</span>
-          <input className="input" inputMode="decimal" value={form.minimum_grade} onChange={(e) => update('minimum_grade', e.target.value)} />
+          <input className="input" inputMode="decimal" value={minPassingGrade} onChange={(e) => setMinPassingGrade(e.target.value)} disabled={!isAdmin && !guestMode} />
         </label>
-        <p className="hint">La suma de porcentajes debe ser exactamente 100%.</p>
-        <div className="action-row">
-          <button className="btn primary" onClick={() => onSave(form)}>💾 Guardar cambios</button>
-          <button className="btn secondary" onClick={() => setForm(DEFAULT_SETTINGS)}>↩️ Restablecer</button>
-        </div>
+        <p className="hint">La suma de porcentajes debe ser 100%. {isAdmin ? 'Como administrador, estos cambios se guardan para todos los usuarios de la plantilla.' : guestMode ? 'En invitado, los cambios son locales.' : 'Los alumnos usan la configuración de su universidad.'}</p>
+        {(isAdmin || guestMode) && (
+          <div className="action-row">
+            <button className="btn primary" onClick={() => onSaveTemplate?.({ templateId, minPassingGrade, components })}>💾 Guardar cambios</button>
+          </div>
+        )}
       </Card>
     </div>
   )
@@ -1956,6 +2131,7 @@ function About() {
 
 function AdminDashboard({ data, onLoad, setScreen }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const [filters, setFilters] = useState({ university: '', faculty: '', career: '', cycle: '' })
   const users = data?.users || []
   const courses = data?.courses || []
   const calculations = data?.calculations || []
@@ -1966,7 +2142,33 @@ function AdminDashboard({ data, onLoad, setScreen }) {
   const hourly = groupByHour(todayLogins)
   const byCareer = countBy(users, (u) => u.career?.name || 'Sin carrera')
   const byCycle = countBy(users, (u) => u.cycle?.name || 'Sin ciclo')
-  const distribution = buildDistribution(users, courses, calculations)
+
+  const universities = unique([...users, ...courses].map((item) => item.university?.code || item.university?.name).filter(Boolean))
+  const faculties = unique([...users, ...courses]
+    .filter((item) => !filters.university || (item.university?.code || item.university?.name) === filters.university)
+    .map((item) => item.faculty?.name)
+    .filter(Boolean))
+  const careers = unique([...users, ...courses]
+    .filter((item) => !filters.university || (item.university?.code || item.university?.name) === filters.university)
+    .filter((item) => !filters.faculty || item.faculty?.name === filters.faculty)
+    .map((item) => item.career?.name)
+    .filter(Boolean))
+  const cycles = unique([...users, ...courses].map((item) => item.cycle?.name).filter(Boolean))
+
+  const matchesContext = (item) => {
+    const university = item?.university?.code || item?.university?.name || ''
+    const faculty = item?.faculty?.name || ''
+    const career = item?.career?.name || ''
+    const cycle = item?.cycle?.name || ''
+    return (!filters.university || university === filters.university) &&
+      (!filters.faculty || faculty === filters.faculty) &&
+      (!filters.career || career === filters.career) &&
+      (!filters.cycle || cycle === filters.cycle)
+  }
+  const filteredUsers = users.filter(matchesContext)
+  const filteredCourses = courses.filter(matchesContext)
+  const filteredCalculations = calculations.filter((item) => matchesContext(item.course || {}))
+  const distribution = buildDistribution(filteredUsers, filteredCourses, filteredCalculations)
   const byEnrollmentType = countBy(studentCourses.filter((item) => item.status === 'visible'), (item) => formatEnrollmentType(item.enrollment_type))
 
   return (
@@ -1989,7 +2191,23 @@ function AdminDashboard({ data, onLoad, setScreen }) {
       </div>
       <Card>
         <h3>Distribución por carrera y ciclo</h3>
-        <ResponsiveTable rows={distribution} columns={['carrera', 'ciclo', 'usuarios', 'cursos', 'calculos']} />
+        <div className="filters admin-course-filters">
+          <select className="input" value={filters.university} onChange={(e) => setFilters({ ...filters, university: e.target.value, faculty: '', career: '' })}>
+            <option value="">Todas las universidades</option>{universities.map((u) => <option key={u}>{u}</option>)}
+          </select>
+          <select className="input" value={filters.faculty} onChange={(e) => setFilters({ ...filters, faculty: e.target.value, career: '' })}>
+            <option value="">Todas las facultades</option>{faculties.map((f) => <option key={f}>{f}</option>)}
+          </select>
+          <select className="input" value={filters.career} onChange={(e) => setFilters({ ...filters, career: e.target.value })}>
+            <option value="">Todas las carreras</option>{careers.map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <select className="input" value={filters.cycle} onChange={(e) => setFilters({ ...filters, cycle: e.target.value })}>
+            <option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="admin-scroll-list">
+          <ResponsiveTable rows={distribution} columns={['carrera', 'ciclo', 'usuarios', 'cursos', 'calculos']} />
+        </div>
       </Card>
       <div className="grid three">
         <button className="btn secondary" onClick={() => setScreen('admin-users')}>👥 Gestionar usuarios</button>
