@@ -518,3 +518,11 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
     flex-wrap: wrap;
   }
 }
+
+/* v1.1.0 multiuniversidad */
+.component-list { display: grid; gap: 8px; margin-top: 12px; }
+.component-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 14px; background: #faf7ff; border: 1px solid var(--purple-border); }
+@media (max-width: 720px) { .component-row { grid-template-columns: 1fr; } }
+.badge.draft { background: #fef3c7; color: #92400e; }
+.badge.inactive { background: #fee2e2; color: #991b1b; }
+.badge.active { background: #dcfce7; color: #166534; }

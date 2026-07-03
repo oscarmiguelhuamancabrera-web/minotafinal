@@ -10,11 +10,15 @@ import {
   generateMissingGrades,
   normalizeGradesForDb,
   toNumber,
-  validateSettings
+  validateSettings,
+  normalizeEvaluationComponents,
+  emptyDynamicGrades,
+  calculateFlexibleGradeResult,
+  generateFlexibleMissingGrades
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.0.6'
+const APP_VERSION = '1.1.0'
 
 const emptyAuth = {
   firstName: '',
@@ -22,6 +26,8 @@ const emptyAuth = {
   email: '',
   password: '',
   confirmPassword: '',
+  universityId: '',
+  facultyId: '',
   careerId: '',
   cycleId: ''
 }
@@ -97,6 +103,20 @@ function creatorName(course) {
   return course?.creator ? fullName(course.creator) : 'Sistema'
 }
 
+function universityName(item) {
+  return item?.university?.name || 'Sin universidad'
+}
+
+function facultyName(item) {
+  return item?.faculty?.name || 'Sin facultad'
+}
+
+function academicContext(profile) {
+  if (!profile) return 'Perfil pendiente'
+  if (profile.role === 'admin' || profile.role === 'superadmin') return 'Administrador general'
+  return [profile.university?.code || profile.university?.name, profile.faculty?.name, profile.career?.name, profile.cycle?.name].filter(Boolean).join(' · ') || 'Perfil pendiente'
+}
+
 function courseCycleName(course) {
   return course?.cycle?.name || 'Sin ciclo'
 }
@@ -120,14 +140,17 @@ function buildProfileFromAuthUser(user) {
     full_name: `${first || ''} ${last || ''}`.trim(),
     role: email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'student',
     status: 'active',
-    career_id: null,
-    current_cycle_id: null,
+    university_id: metadata.university_id || null,
+    faculty_id: metadata.faculty_id || null,
+    career_id: metadata.career_id || null,
+    current_cycle_id: metadata.current_cycle_id || null,
     has_seen_tutorial: false
   }
 }
 
 function isProfileIncomplete(userProfile) {
-  return !userProfile?.first_name || !userProfile?.last_name || !userProfile?.career_id || !userProfile?.current_cycle_id
+  if (userProfile?.role === 'admin' || userProfile?.role === 'superadmin') return false
+  return !userProfile?.first_name || !userProfile?.last_name || !userProfile?.university_id || !userProfile?.faculty_id || !userProfile?.career_id || !userProfile?.current_cycle_id
 }
 
 function getErrorMessage(error) {
@@ -151,6 +174,8 @@ function getErrorMessage(error) {
 function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [universities, setUniversities] = useState([])
+  const [faculties, setFaculties] = useState([])
   const [careers, setCareers] = useState([])
   const [cycles, setCycles] = useState([])
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
@@ -158,6 +183,8 @@ function App() {
   const [availableCourses, setAvailableCourses] = useState([])
   const [selectedCourseId, setSelectedCourseId] = useState('')
   const [grades, setGrades] = useState(emptyGrades())
+  const [evaluationTemplate, setEvaluationTemplate] = useState(null)
+  const [evaluationItems, setEvaluationItems] = useState(normalizeEvaluationComponents([], settings))
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
   const [adminData, setAdminData] = useState(null)
@@ -167,9 +194,13 @@ function App() {
   const [loading, setLoading] = useState(true)
   const recordedLoginRef = useRef('')
 
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin'
   const activeCourse = courses.find((course) => course.id === selectedCourseId) || null
   const greetingName = firstWord(profile?.first_name || profile?.full_name)
+
+  function getDefaultTemplateIdForProfile() {
+    return null
+  }
 
   useEffect(() => {
     initialize()
@@ -193,7 +224,7 @@ function App() {
 
   async function initialize() {
     setLoading(true)
-    await Promise.all([loadCareers(), loadCycles()])
+    await Promise.all([loadUniversities(), loadFaculties(), loadCareers(), loadCycles()])
     const { data } = await supabase.auth.getSession()
     setSession(data.session)
     if (data.session?.user) {
@@ -207,8 +238,18 @@ function App() {
     window.setTimeout(() => setNotice(null), 5500)
   }
 
+  async function loadUniversities() {
+    const { data, error } = await supabase.from('universities').select('*').eq('status', 'active').order('name')
+    if (!error) setUniversities(data || [])
+  }
+
+  async function loadFaculties() {
+    const { data, error } = await supabase.from('faculties').select('*, university:universities(id,name,code)').eq('status', 'active').order('name')
+    if (!error) setFaculties(data || [])
+  }
+
   async function loadCareers() {
-    const { data, error } = await supabase.from('careers').select('*').eq('status', 'active').order('name')
+    const { data, error } = await supabase.from('careers').select('*, faculty:faculties(id,name,university_id, university:universities(id,name,code))').eq('status', 'active').order('name')
     if (!error) setCareers(data || [])
   }
 
@@ -220,7 +261,7 @@ function App() {
   async function loadProfileAndData(user) {
     const { data: userProfile, error } = await supabase
       .from('profiles')
-      .select('*, career:careers(id,name), cycle:cycles(id,name,order_number)')
+      .select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name,faculty_id), cycle:cycles(id,name,order_number)')
       .eq('id', user.id)
       .single()
 
@@ -268,6 +309,8 @@ function App() {
     await supabase.from('login_activity').insert({
       user_id: userProfile.id,
       role: userProfile.role,
+      university_id: userProfile.university_id,
+      faculty_id: userProfile.faculty_id,
       career_id: userProfile.career_id,
       cycle_id: userProfile.current_cycle_id,
       user_agent: navigator.userAgent
@@ -281,7 +324,7 @@ function App() {
   }
 
   async function loadCourses(userProfile = profile) {
-    if (!userProfile?.career_id) {
+    if (!userProfile?.career_id || !userProfile?.university_id) {
       setCourses([])
       setAvailableCourses([])
       return
@@ -289,7 +332,8 @@ function App() {
 
     const officialRes = await supabase
       .from('courses')
-      .select('*, career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email)')
+      .select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name,min_passing_grade)')
+      .eq('university_id', userProfile.university_id)
       .eq('career_id', userProfile.career_id)
       .eq('status', 'active')
       .order('name')
@@ -308,7 +352,7 @@ function App() {
 
     const studentRes = await supabase
       .from('student_courses')
-      .select('id,enrollment_type,status,course_id,course:courses!inner(*, career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email))')
+      .select('id,enrollment_type,status,course_id,course:courses!inner(*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name,min_passing_grade))')
       .eq('user_id', userProfile.id)
       .eq('status', 'visible')
       .eq('course.status', 'active')
@@ -350,9 +394,70 @@ function App() {
     setSelectedCourseId(courseId)
     setResult(null)
     if (!session?.user || !courseId) {
-      setGrades(emptyGrades())
+      const fallback = normalizeEvaluationComponents([], settings)
+      setEvaluationTemplate(null)
+      setEvaluationItems(fallback)
+      setGrades(emptyDynamicGrades(fallback))
       return
     }
+
+    const course = courses.find((c) => c.id === courseId) || availableCourses.find((c) => c.id === courseId)
+    let template = course?.evaluation_template || null
+
+    if (!template && course?.evaluation_template_id) {
+      const { data } = await supabase
+        .from('evaluation_templates')
+        .select('*')
+        .eq('id', course.evaluation_template_id)
+        .maybeSingle()
+      template = data || null
+    }
+
+    if (!template) {
+      let query = supabase
+        .from('evaluation_templates')
+        .select('*')
+        .eq('status', 'active')
+        .order('created_at', { ascending: true })
+        .limit(1)
+      if (course?.university_id) query = query.eq('university_id', course.university_id)
+      const { data } = await query.maybeSingle()
+      template = data || null
+    }
+
+    if (template?.id) {
+      const { data: components, error: compError } = await supabase
+        .from('evaluation_components')
+        .select('*')
+        .eq('template_id', template.id)
+        .eq('status', 'active')
+        .order('component_order')
+
+      const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(components || [], settings)
+      setEvaluationTemplate(template)
+      setEvaluationItems(items)
+
+      const { data: scoreRows, error: scoreError } = await supabase
+        .from('student_evaluation_scores')
+        .select('*')
+        .eq('course_id', courseId)
+        .eq('user_id', session.user.id)
+
+      if (!scoreError) {
+        const next = emptyDynamicGrades(items)
+        ;(scoreRows || []).forEach((row) => {
+          const item = items.find((it) => it.id === row.evaluation_component_id)
+          if (item) next[item.key] = row.score ?? ''
+        })
+        setGrades(next)
+        return
+      }
+    }
+
+    // Fallback de compatibilidad con la tabla antigua course_grades.
+    const fallbackItems = normalizeEvaluationComponents([], settings)
+    setEvaluationTemplate(null)
+    setEvaluationItems(fallbackItems)
     const { data, error } = await supabase
       .from('course_grades')
       .select('*')
@@ -369,13 +474,13 @@ function App() {
         final_exam: data.final_exam ?? ''
       })
     } else {
-      setGrades(emptyGrades())
+      setGrades(emptyDynamicGrades(fallbackItems))
     }
   }
 
   async function handleRegister(form) {
-    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim() || !form.password || !form.careerId || !form.cycleId) {
-      notify('error', 'Completa nombres, apellidos, correo, carrera, ciclo y contraseña.')
+    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim() || !form.password || !form.universityId || !form.facultyId || !form.careerId || !form.cycleId) {
+      notify('error', 'Completa nombres, apellidos, correo, universidad, facultad, carrera, ciclo y contraseña.')
       return
     }
     if (form.password.length < 6) {
@@ -395,6 +500,8 @@ function App() {
           first_name: form.firstName.trim(),
           last_name: form.lastName.trim(),
           full_name: `${form.firstName.trim()} ${form.lastName.trim()}`,
+          university_id: form.universityId,
+          faculty_id: form.facultyId,
           career_id: form.careerId,
           current_cycle_id: form.cycleId
         }
@@ -464,13 +571,15 @@ function App() {
     setSettings(loadGuestSettings())
     setCourses([])
     setAvailableCourses([])
-    setGrades(emptyGrades())
+    setGrades(emptyDynamicGrades(evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)))
     setResult(null)
     setScreen('guest-calculator')
   }
 
   function handleCalculate() {
-    const calculation = calculateGradeResult(grades, settings)
+    const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
+    const minimum = evaluationTemplate?.min_passing_grade || settings.minimum_grade
+    const calculation = calculateFlexibleGradeResult(grades, items, minimum)
     if (calculation.error) {
       notify('error', calculation.error)
       return
@@ -479,7 +588,9 @@ function App() {
   }
 
   function handleGenerate() {
-    const generated = generateMissingGrades(grades, settings)
+    const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
+    const minimum = evaluationTemplate?.min_passing_grade || settings.minimum_grade
+    const generated = generateFlexibleMissingGrades(grades, items, minimum)
     if (generated.error) {
       notify('error', generated.error)
       return
@@ -489,7 +600,8 @@ function App() {
   }
 
   function handleClean() {
-    setGrades(emptyGrades())
+    const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
+    setGrades(emptyDynamicGrades(items))
     setResult(null)
   }
 
@@ -502,26 +614,54 @@ function App() {
       notify('error', 'Selecciona un curso para guardar el resultado.')
       return
     }
-    const calculation = result ? { error: null, result } : calculateGradeResult(grades, settings)
+    const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
+    const minimum = evaluationTemplate?.min_passing_grade || settings.minimum_grade
+    const calculation = result ? { error: null, result } : calculateFlexibleGradeResult(grades, items, minimum)
     if (calculation.error) {
       notify('error', calculation.error)
       return
     }
     const normalized = normalizeGradesForDb(grades)
-    const upsertPayload = {
-      user_id: session.user.id,
-      course_id: selectedCourseId,
-      ...normalized
-    }
-    const { error: gradeError } = await supabase.from('course_grades').upsert(upsertPayload, { onConflict: 'user_id,course_id' })
-    if (gradeError) {
-      notify('error', getErrorMessage(gradeError))
-      return
+    if (evaluationTemplate?.id && items.some((item) => item.id)) {
+      const scoreRows = items
+        .filter((item) => item.id)
+        .map((item) => ({
+          user_id: session.user.id,
+          course_id: selectedCourseId,
+          student_course_id: activeCourse?.student_course_id || null,
+          evaluation_template_id: evaluationTemplate.id,
+          evaluation_component_id: item.id,
+          score: toNumber(grades[item.key]),
+          updated_at: new Date().toISOString()
+        }))
+      const { error: scoreError } = await supabase
+        .from('student_evaluation_scores')
+        .upsert(scoreRows, { onConflict: 'user_id,course_id,evaluation_component_id' })
+      if (scoreError) {
+        notify('error', getErrorMessage(scoreError))
+        return
+      }
+    } else {
+      const upsertPayload = {
+        user_id: session.user.id,
+        course_id: selectedCourseId,
+        ...normalized
+      }
+      const { error: gradeError } = await supabase.from('course_grades').upsert(upsertPayload, { onConflict: 'user_id,course_id' })
+      if (gradeError) {
+        notify('error', getErrorMessage(gradeError))
+        return
+      }
     }
     const savePayload = {
       user_id: session.user.id,
       course_id: selectedCourseId,
       ...normalized,
+      evaluation_template_id: evaluationTemplate?.id || null,
+      evaluation_snapshot: {
+        template: evaluationTemplate ? { id: evaluationTemplate.id, name: evaluationTemplate.name } : null,
+        components: items.map((item) => ({ label: item.label, name: item.name, percent: item.percent, score: toNumber(grades[item.key]) }))
+      },
       current_average: calculation.result.current_average,
       evaluated_weight: calculation.result.evaluated_weight,
       pending_weight: calculation.result.pending_weight,
@@ -565,18 +705,21 @@ function App() {
       notify('error', 'Ingresa el nombre del curso.')
       return null
     }
-    if (!profile?.career_id || !profile?.current_cycle_id) {
-      notify('error', 'Completa tu carrera y ciclo antes de crear cursos.')
+    if (!profile?.university_id || !profile?.faculty_id || !profile?.career_id || !profile?.current_cycle_id) {
+      notify('error', 'Completa universidad, facultad, carrera y ciclo antes de crear cursos.')
       return null
     }
     const targetCycleId = options.cycleId || profile.current_cycle_id
     const enrollmentType = options.enrollmentType || 'regular'
     const { data, error } = await supabase.from('courses').insert({
       name: name.trim(),
+      university_id: profile.university_id,
+      faculty_id: profile.faculty_id,
       career_id: profile.career_id,
       cycle_id: targetCycleId,
+      evaluation_template_id: getDefaultTemplateIdForProfile(profile),
       created_by: profile.id
-    }).select('*, career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email)').single()
+    }).select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(id,name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name,min_passing_grade)').single()
     if (error) {
       notify('error', 'No se pudo crear el curso. Puede que ya exista para tu carrera y ciclo.')
       return null
@@ -600,6 +743,10 @@ function App() {
     const payload = {
       user_id: session.user.id,
       course_id: courseId,
+      university_id: profile?.university_id || null,
+      faculty_id: profile?.faculty_id || null,
+      career_id: profile?.career_id || null,
+      cycle_id: (availableCourses.find((c) => c.id === courseId)?.cycle_id || courses.find((c) => c.id === courseId)?.cycle_id || null),
       enrollment_type: enrollmentType,
       status: 'visible',
       updated_at: new Date().toISOString()
@@ -626,7 +773,7 @@ function App() {
     if (targetId) {
       const result = await supabase
         .from('student_courses')
-        .update({ status: 'hidden', updated_at: new Date().toISOString() })
+        .update({ status: 'hidden', hidden_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq('id', targetId)
         .eq('user_id', session.user.id)
       error = result.error
@@ -636,8 +783,13 @@ function App() {
         .upsert({
           user_id: session.user.id,
           course_id: course.id,
+          university_id: course.university_id || profile?.university_id || null,
+          faculty_id: course.faculty_id || profile?.faculty_id || null,
+          career_id: course.career_id || profile?.career_id || null,
+          cycle_id: course.cycle_id || null,
           enrollment_type: course.enrollment_type || 'regular',
           status: 'hidden',
+          hidden_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id,course_id' })
       error = result.error
@@ -656,8 +808,8 @@ function App() {
 
   async function handleUpdateProfile(values) {
     if (!session?.user) return
-    if (!values.firstName?.trim() || !values.lastName?.trim() || !values.careerId || !values.cycleId) {
-      notify('error', 'Completa nombres, apellidos, carrera y ciclo.')
+    if (!values.firstName?.trim() || !values.lastName?.trim() || !values.universityId || !values.facultyId || !values.careerId || !values.cycleId) {
+      notify('error', 'Completa nombres, apellidos, universidad, facultad, carrera y ciclo.')
       return
     }
     const email = session.user.email || profile?.email || ''
@@ -667,6 +819,8 @@ function App() {
       first_name: values.firstName.trim(),
       last_name: values.lastName.trim(),
       full_name: `${values.firstName.trim()} ${values.lastName.trim()}`.trim(),
+      university_id: values.universityId,
+      faculty_id: values.facultyId,
       career_id: values.careerId,
       current_cycle_id: values.cycleId,
       role: profile?.role || (email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'student'),
@@ -681,12 +835,16 @@ function App() {
   }
 
   async function loadAdminData() {
-    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes] = await Promise.all([
-      supabase.from('profiles').select('*, career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
-      supabase.from('courses').select('*, career:careers(name), cycle:cycles(name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email)').order('created_at', { ascending: false }),
-      supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id), course:courses(name, career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(200),
-      supabase.from('login_activity').select('*, profile:profiles(first_name,last_name,email), career:careers(name), cycle:cycles(name)').order('login_at', { ascending: false }).limit(300),
-      supabase.from('student_courses').select('*, profile:profiles(first_name,last_name,email, career:careers(name), cycle:cycles(name)), course:courses(name, career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(500)
+    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, templatesRes, componentsRes] = await Promise.all([
+      supabase.from('profiles').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
+      supabase.from('courses').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number), creator:profiles!courses_created_by_fkey(first_name,last_name,email), evaluation_template:evaluation_templates(id,name)').order('created_at', { ascending: false }),
+      supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), evaluation_template:evaluation_templates(name)').order('created_at', { ascending: false }).limit(200),
+      supabase.from('login_activity').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)').order('login_at', { ascending: false }).limit(300),
+      supabase.from('student_courses').select('*, profile:profiles(first_name,last_name,email, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(500),
+      supabase.from('universities').select('*').order('name'),
+      supabase.from('faculties').select('*, university:universities(id,name,code)').order('name'),
+      supabase.from('evaluation_templates').select('*, university:universities(name,code), faculty:faculties(name), career:careers(name), course:courses(name), creator:profiles!evaluation_templates_created_by_fkey(first_name,last_name,email)').order('created_at', { ascending: false }),
+      supabase.from('evaluation_components').select('*').order('component_order')
     ])
 
     setAdminData({
@@ -694,7 +852,11 @@ function App() {
       courses: coursesRes.data || [],
       calculations: calculationsRes.data || [],
       logins: loginsRes.data || [],
-      studentCourses: studentCoursesRes.data || []
+      studentCourses: studentCoursesRes.data || [],
+      universities: universitiesRes.data || [],
+      faculties: facultiesRes.data || [],
+      templates: templatesRes.data || [],
+      components: componentsRes.data || []
     })
   }
 
@@ -713,6 +875,60 @@ function App() {
     if (error) notify('error', getErrorMessage(error))
     else {
       notify('success', 'Rol actualizado correctamente.')
+      await loadAdminData()
+    }
+  }
+
+  async function createEvaluationTemplate(payload) {
+    const { error } = await supabase.from('evaluation_templates').insert({
+      name: payload.name?.trim(),
+      description: payload.description?.trim() || null,
+      university_id: payload.universityId || null,
+      faculty_id: payload.facultyId || null,
+      career_id: payload.careerId || null,
+      course_id: payload.courseId || null,
+      min_passing_grade: Number(payload.minPassingGrade || 11),
+      status: 'draft',
+      created_by: profile?.id || null
+    })
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Método de evaluación creado. Agrega componentes hasta sumar 100% y luego actívalo.')
+      await loadAdminData()
+    }
+  }
+
+  async function updateEvaluationTemplate(templateId, payload) {
+    const { error } = await supabase.from('evaluation_templates').update(payload).eq('id', templateId)
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Método actualizado correctamente.')
+      await loadAdminData()
+    }
+  }
+
+  async function createEvaluationComponent(payload) {
+    const { error } = await supabase.from('evaluation_components').insert({
+      template_id: payload.templateId,
+      short_name: payload.shortName?.trim(),
+      name: payload.name?.trim(),
+      unit_name: payload.unitName?.trim() || null,
+      weight_percent: Number(payload.weightPercent || 0),
+      component_order: Number(payload.componentOrder || 1),
+      status: 'active'
+    })
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Componente agregado correctamente.')
+      await loadAdminData()
+    }
+  }
+
+  async function updateEvaluationComponent(componentId, payload) {
+    const { error } = await supabase.from('evaluation_components').update(payload).eq('id', componentId)
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Componente actualizado correctamente.')
       await loadAdminData()
     }
   }
@@ -761,10 +977,10 @@ function App() {
           />
         )}
         {!session && !guestMode && screen === 'register' && (
-          <Register careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('login')} />
+          <Register universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('login')} />
         )}
         {session && screen === 'complete-profile' && (
-          <CompleteProfile careers={careers} cycles={cycles} profile={profile} onSubmit={handleUpdateProfile} />
+          <CompleteProfile universities={universities} faculties={faculties} careers={careers} cycles={cycles} profile={profile} onSubmit={handleUpdateProfile} />
         )}
         {session && screen === 'tutorial' && (
           <OnboardingTutorial onStart={handleFinishTutorial} onSkip={handleFinishTutorial} />
@@ -795,6 +1011,8 @@ function App() {
                 onClean={handleClean}
                 onSave={null}
                 guestMode
+                evaluationTemplate={null}
+                evaluationItems={normalizeEvaluationComponents([], settings)}
               />
             )}
             {guestMode && screen === 'guest-settings' && <SettingsScreen settings={settings} onSave={(s) => handleSaveSettings(s, true)} guestMode />}
@@ -817,17 +1035,20 @@ function App() {
                 onClean={handleClean}
                 onSave={handleSaveResult}
                 activeCourse={activeCourse}
+                evaluationTemplate={evaluationTemplate}
+                evaluationItems={evaluationItems}
               />
             )}
             {session && screen === 'history' && <HistoryScreen history={history} />}
             {session && screen === 'settings' && <SettingsScreen settings={settings} onSave={handleSaveSettings} />}
-            {session && screen === 'profile' && <ProfileScreen profile={profile} careers={careers} cycles={cycles} onSave={handleUpdateProfile} />}
+            {session && screen === 'profile' && <ProfileScreen profile={profile} universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSave={handleUpdateProfile} />}
             {screen === 'about' && <About />}
             {screen === 'more' && <MoreScreen isAdmin={isAdmin} guestMode={guestMode} setScreen={setScreen} onSignOut={async () => { setGuestMode(false); await supabase.auth.signOut() }} />}
             {session && isAdmin && screen === 'admin-dashboard' && <AdminDashboard data={adminData} onLoad={loadAdminData} setScreen={setScreen} />}
             {session && isAdmin && screen === 'admin-users' && <AdminUsers data={adminData} onLoad={loadAdminData} onToggle={toggleUserStatus} onRole={changeUserRole} />}
             {session && isAdmin && screen === 'admin-courses' && <AdminCourses data={adminData} onLoad={loadAdminData} onUpdate={updateCourseAdmin} />}
             {session && isAdmin && screen === 'admin-calculations' && <AdminCalculations data={adminData} onLoad={loadAdminData} />}
+            {session && isAdmin && screen === 'admin-evaluations' && <AdminEvaluations data={adminData} onLoad={loadAdminData} onCreateTemplate={createEvaluationTemplate} onUpdateTemplate={updateEvaluationTemplate} onCreateComponent={createEvaluationComponent} onUpdateComponent={updateEvaluationComponent} />}
           </AuthenticatedLayout>
         )}
       </main>
@@ -895,12 +1116,29 @@ function OnboardingTutorial({ onStart, onSkip }) {
 function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const passwordRef = useRef(null)
+  const submitLogin = () => onSubmit(email, password)
   return (
     <AuthCard title="Mi Nota Final" className="login-card">
       <p className="auth-subtitle">Ingresa tus datos o continúa con una cuenta social.</p>
-      <input className="input" type="email" placeholder="Correo electrónico" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <input className="input" type="password" placeholder="Contraseña" value={password} onChange={(e) => setPassword(e.target.value)} />
-      <button className="btn primary" onClick={() => onSubmit(email, password)}>Ingresar</button>
+      <input
+        className="input"
+        type="email"
+        placeholder="Correo electrónico"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') passwordRef.current?.focus() }}
+      />
+      <input
+        ref={passwordRef}
+        className="input"
+        type="password"
+        placeholder="Contraseña"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') submitLogin() }}
+      />
+      <button className="btn primary" onClick={submitLogin}>Ingresar</button>
       <SocialButton provider="google" onClick={onGoogle}>Continuar con Google</SocialButton>
       <SocialButton provider="microsoft" onClick={onMicrosoft}>Continuar con Microsoft</SocialButton>
       <div className="auth-links">
@@ -913,9 +1151,21 @@ function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }
   )
 }
 
-function Register({ careers, cycles, onSubmit, onBack }) {
+function Register({ universities, faculties, careers, cycles, onSubmit, onBack }) {
   const [form, setForm] = useState(emptyAuth)
-  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }))
+  const filteredFaculties = faculties.filter((faculty) => !form.universityId || faculty.university_id === form.universityId)
+  const filteredCareers = careers.filter((career) => !form.facultyId || career.faculty_id === form.facultyId)
+  const update = (key, value) => {
+    setForm((prev) => {
+      const next = { ...prev, [key]: value }
+      if (key === 'universityId') {
+        next.facultyId = ''
+        next.careerId = ''
+      }
+      if (key === 'facultyId') next.careerId = ''
+      return next
+    })
+  }
   return (
     <AuthCard title="Crear cuenta" onBack={onBack}>
       <div className="grid two">
@@ -923,9 +1173,17 @@ function Register({ careers, cycles, onSubmit, onBack }) {
         <input className="input" placeholder="Apellidos" value={form.lastName} onChange={(e) => update('lastName', e.target.value)} />
       </div>
       <input className="input" type="email" placeholder="Correo electrónico" value={form.email} onChange={(e) => update('email', e.target.value)} />
-      <select className="input" value={form.careerId} onChange={(e) => update('careerId', e.target.value)}>
+      <select className="input" value={form.universityId} onChange={(e) => update('universityId', e.target.value)}>
+        <option value="">Selecciona tu universidad</option>
+        {universities.map((university) => <option key={university.id} value={university.id}>{university.name}</option>)}
+      </select>
+      <select className="input" value={form.facultyId} onChange={(e) => update('facultyId', e.target.value)} disabled={!form.universityId}>
+        <option value="">Selecciona tu facultad</option>
+        {filteredFaculties.map((faculty) => <option key={faculty.id} value={faculty.id}>{faculty.name}</option>)}
+      </select>
+      <select className="input" value={form.careerId} onChange={(e) => update('careerId', e.target.value)} disabled={!form.facultyId}>
         <option value="">Selecciona tu carrera</option>
-        {careers.map((career) => <option key={career.id} value={career.id}>{career.name}</option>)}
+        {filteredCareers.map((career) => <option key={career.id} value={career.id}>{career.name}</option>)}
       </select>
       <select className="input" value={form.cycleId} onChange={(e) => update('cycleId', e.target.value)}>
         <option value="">Selecciona tu ciclo</option>
@@ -936,7 +1194,7 @@ function Register({ careers, cycles, onSubmit, onBack }) {
         <input className="input" type="password" placeholder="Confirmar contraseña" value={form.confirmPassword} onChange={(e) => update('confirmPassword', e.target.value)} />
       </div>
       <button className="btn primary" onClick={() => onSubmit(form)}>Crear cuenta</button>
-      <p className="hint">Al registrarte deberás confirmar tu correo electrónico antes de iniciar sesión.</p>
+      <button className="btn link" onClick={onBack}>Ya tengo cuenta</button>
     </AuthCard>
   )
 }
@@ -994,17 +1252,17 @@ function Dashboard({ profile, courses, history, setScreen, onSelectCourse }) {
         <div>
           <p className="eyebrow">Panel principal</p>
           <h1>Hola, {firstWord(profile?.first_name || profile?.full_name)}</h1>
-          <p>{profile?.career?.name || 'Carrera pendiente'} · {profile?.cycle?.name || 'Ciclo pendiente'}</p>
+          <p>{academicContext(profile)}</p>
         </div>
         <div className="hero-actions">
-          <button className="btn secondary small" onClick={() => setScreen('profile')}>🔄 Cambiar ciclo</button>
+          <button className="btn secondary small" onClick={() => setScreen('profile')}>🔄 Cambiar perfil académico</button>
           <button className="btn primary small" onClick={() => setScreen('calculator')}>🧮 Calcular</button>
         </div>
       </div>
       <div className="cards stats-grid">
         <StatCard icon="📚" label="Mis cursos actuales" value={courses.length} />
         <StatCard icon="📊" label="Resultados guardados" value={history.length} />
-        <StatCard icon="⚙️" label="Ciclo actual" value={profile?.cycle?.name || '—'} />
+        <StatCard icon="🏛️" label="Universidad" value={profile?.university?.code || '—'} />
       </div>
       <Card>
         <div className="section-title">
@@ -1075,7 +1333,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
 
   return (
     <div className="page fade-in">
-      <Header title="Mis cursos" subtitle={`${profile?.career?.name || 'Carrera'} · ${profile?.cycle?.name || 'Ciclo actual'}`} />
+      <Header title="Mis cursos" subtitle={academicContext(profile)} />
       <Card>
         <h3>Agregar curso a mi lista</h3>
         <p className="hint">Puedes agregar cursos de tu ciclo actual, cursos arrastrados, adelantados, electivos u otros. Tu página principal mostrará solo estos cursos.</p>
@@ -1123,7 +1381,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
             <div key={course.id} className="student-course-card">
               <div>
                 <h3>{course.name}</h3>
-                <p>{courseCycleName(course)} · <b>{formatEnrollmentType(course.enrollment_type)}</b> · Creado por: {creatorName(course)}</p>
+                <p>{courseCycleName(course)} · <b>{formatEnrollmentType(course.enrollment_type)}</b> · {course.university?.code || ''} · Creado por: {creatorName(course)}</p>
               </div>
               <div className="action-row left compact-actions">
                 <button className="btn secondary small" onClick={() => onSelect(course.id)}>Calcular</button>
@@ -1137,9 +1395,9 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   )
 }
 
-function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode }) {
-  const practices = EVALUATIONS.filter((e) => e.group === 'Prácticas calificadas')
-  const exams = EVALUATIONS.filter((e) => e.group === 'Exámenes')
+function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems }) {
+  const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
+  const groups = [...new Set(items.map((item) => item.group || 'Evaluaciones'))]
   const updateGrade = (key, value) => setGrades((prev) => ({ ...prev, [key]: value }))
 
   return (
@@ -1154,8 +1412,10 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
           activeCourse={activeCourse}
         />
       )}
-      <EvaluationSection title="Prácticas calificadas" items={practices} grades={grades} settings={settings} updateGrade={updateGrade} />
-      <EvaluationSection title="Exámenes" items={exams} grades={grades} settings={settings} updateGrade={updateGrade} />
+      {evaluationTemplate && <Card><p className="hint"><b>Método de evaluación:</b> {evaluationTemplate.name}</p></Card>}
+      {groups.map((group) => (
+        <EvaluationSection key={group} title={group} items={items.filter((item) => item.group === group)} grades={grades} settings={settings} updateGrade={updateGrade} flexible />
+      ))}
       <div className="action-row">
         <button className="btn primary" onClick={onCalculate}>🧮 Calcular</button>
         <button className="btn warning" onClick={onClean}>🧹 Limpiar</button>
@@ -1212,14 +1472,14 @@ function CourseCombo({ courses, selectedCourseId, onSelectCourse, onCreateCourse
   )
 }
 
-function EvaluationSection({ title, items, grades, settings, updateGrade }) {
+function EvaluationSection({ title, items, grades, settings, updateGrade, flexible })  {
   return (
     <Card>
       <div className="section-title"><span>▦</span><h3>{title}</h3></div>
       <div className="eval-grid">
         {items.map((item) => (
           <div className="eval-card" key={item.key}>
-            <div className="eval-head"><strong>{item.label}</strong><span>{formatPercent(settings[item.percentKey])}%</span></div>
+            <div className="eval-head"><strong>{item.label}</strong><span>{formatPercent(flexible ? item.percent : settings[item.percentKey])}%</span></div>
             <input className="input grade" inputMode="decimal" placeholder="—" value={grades[item.key]} onChange={(e) => updateGrade(item.key, e.target.value)} />
           </div>
         ))}
@@ -1312,21 +1572,23 @@ function SettingsScreen({ settings, onSave, guestMode }) {
   )
 }
 
-function ProfileScreen({ profile, careers, cycles, onSave }) {
+function ProfileScreen({ profile, universities, faculties, careers, cycles, onSave }) {
   return (
     <div className="page fade-in">
-      <Header title="Perfil" subtitle="Actualiza tus datos personales, carrera y ciclo actual." />
+      <Header title="Perfil" subtitle="Actualiza tus datos personales, universidad, facultad, carrera y ciclo actual." />
       <Card>
-        <ProfileForm profile={profile} careers={careers} cycles={cycles} onSave={onSave} buttonText="Guardar perfil" />
+        <ProfileForm profile={profile} universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSave={onSave} buttonText="Guardar perfil" />
       </Card>
     </div>
   )
 }
 
-function ProfileForm({ profile, careers, cycles, onSave, buttonText = 'Guardar perfil' }) {
+function ProfileForm({ profile, universities, faculties, careers, cycles, onSave, buttonText = 'Guardar perfil' }) {
   const [form, setForm] = useState({
     firstName: profile?.first_name || '',
     lastName: profile?.last_name || '',
+    universityId: profile?.university_id || '',
+    facultyId: profile?.faculty_id || '',
     careerId: profile?.career_id || '',
     cycleId: profile?.current_cycle_id || ''
   })
@@ -1334,11 +1596,25 @@ function ProfileForm({ profile, careers, cycles, onSave, buttonText = 'Guardar p
     setForm({
       firstName: profile?.first_name || '',
       lastName: profile?.last_name || '',
+      universityId: profile?.university_id || '',
+      facultyId: profile?.faculty_id || '',
       careerId: profile?.career_id || '',
       cycleId: profile?.current_cycle_id || ''
     })
-  }, [profile?.id, profile?.first_name, profile?.last_name, profile?.career_id, profile?.current_cycle_id])
-  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }))
+  }, [profile?.id, profile?.first_name, profile?.last_name, profile?.university_id, profile?.faculty_id, profile?.career_id, profile?.current_cycle_id])
+  const filteredFaculties = (faculties || []).filter((faculty) => !form.universityId || faculty.university_id === form.universityId)
+  const filteredCareers = (careers || []).filter((career) => !form.facultyId || career.faculty_id === form.facultyId)
+  const update = (key, value) => {
+    setForm((prev) => {
+      const next = { ...prev, [key]: value }
+      if (key === 'universityId') {
+        next.facultyId = ''
+        next.careerId = ''
+      }
+      if (key === 'facultyId') next.careerId = ''
+      return next
+    })
+  }
   return (
     <div className="stack">
       <div className="grid two">
@@ -1346,27 +1622,36 @@ function ProfileForm({ profile, careers, cycles, onSave, buttonText = 'Guardar p
         <input className="input" placeholder="Apellidos" value={form.lastName} onChange={(e) => update('lastName', e.target.value)} />
       </div>
       {profile?.email && <input className="input" value={profile.email} disabled />}
-      <select className="input" value={form.careerId} onChange={(e) => update('careerId', e.target.value)}>
+      <select className="input" value={form.universityId} onChange={(e) => update('universityId', e.target.value)}>
+        <option value="">Selecciona universidad</option>
+        {(universities || []).map((university) => <option key={university.id} value={university.id}>{university.name}</option>)}
+      </select>
+      <select className="input" value={form.facultyId} onChange={(e) => update('facultyId', e.target.value)} disabled={!form.universityId}>
+        <option value="">Selecciona facultad</option>
+        {filteredFaculties.map((faculty) => <option key={faculty.id} value={faculty.id}>{faculty.name}</option>)}
+      </select>
+      <select className="input" value={form.careerId} onChange={(e) => update('careerId', e.target.value)} disabled={!form.facultyId}>
         <option value="">Selecciona carrera</option>
-        {careers.map((career) => <option key={career.id} value={career.id}>{career.name}</option>)}
+        {filteredCareers.map((career) => <option key={career.id} value={career.id}>{career.name}</option>)}
       </select>
       <select className="input" value={form.cycleId} onChange={(e) => update('cycleId', e.target.value)}>
         <option value="">Selecciona ciclo</option>
-        {cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
+        {(cycles || []).map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
       </select>
+      <p className="hint">Puedes cambiar de universidad, facultad, carrera o ciclo cuando sea necesario. El sistema conservará el historial.</p>
       <button className="btn primary" onClick={() => onSave(form)}>{buttonText}</button>
     </div>
   )
 }
 
-function CompleteProfile({ profile, careers, cycles, onSubmit }) {
+function CompleteProfile({ profile, universities, faculties, careers, cycles, onSubmit }) {
   return (
     <div className="page fade-in">
       <Card className="complete-profile-card">
         <img className="mini-logo" src="/logo.png" alt="Mi Nota Final" />
         <h1>Completa tu perfil</h1>
-        <p className="muted">Antes de continuar, indica tu carrera y ciclo actual. Luego podrás agregar a tu lista los cursos que realmente estás llevando.</p>
-        <ProfileForm profile={profile || {}} careers={careers} cycles={cycles} onSave={onSubmit} buttonText="Guardar y continuar" />
+        <p className="muted">Antes de continuar, indica tu universidad, facultad, carrera y ciclo actual. Luego podrás agregar los cursos que realmente estás llevando.</p>
+        <ProfileForm profile={profile || {}} universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSave={onSubmit} buttonText="Guardar y continuar" />
       </Card>
     </div>
   )
@@ -1443,6 +1728,7 @@ function AdminDashboard({ data, onLoad, setScreen }) {
         <button className="btn secondary" onClick={() => setScreen('admin-users')}>👥 Gestionar usuarios</button>
         <button className="btn secondary" onClick={() => setScreen('admin-courses')}>📚 Gestionar cursos</button>
         <button className="btn secondary" onClick={() => setScreen('admin-calculations')}>📊 Ver cálculos</button>
+        <button className="btn secondary" onClick={() => setScreen('admin-evaluations')}>🧩 Métodos de evaluación</button>
       </div>
     </div>
   )
@@ -1544,6 +1830,117 @@ function AdminCalculations({ data, onLoad }) {
             <p className="hint">Estado: {item.status} · Evaluado: {formatPercent(item.evaluated_weight)}% · Pendiente: {formatPercent(item.pending_weight)}%</p>
           </Card>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function AdminEvaluations({ data, onLoad, onCreateTemplate, onUpdateTemplate, onCreateComponent, onUpdateComponent }) {
+  useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const templates = data?.templates || []
+  const components = data?.components || []
+  const universities = data?.universities || []
+  const faculties = data?.faculties || []
+  const careers = unique((data?.courses || []).map((c) => c.career).filter(Boolean))
+  const courses = data?.courses || []
+  const [newTemplate, setNewTemplate] = useState({ name: '', description: '', universityId: '', facultyId: '', careerId: '', courseId: '', minPassingGrade: 11 })
+  const [newComponent, setNewComponent] = useState({ templateId: '', shortName: '', name: '', unitName: '', weightPercent: '', componentOrder: '' })
+
+  const filteredFaculties = faculties.filter((f) => !newTemplate.universityId || f.university_id === newTemplate.universityId)
+  const filteredCourses = courses.filter((c) => (!newTemplate.universityId || c.university_id === newTemplate.universityId) && (!newTemplate.facultyId || c.faculty_id === newTemplate.facultyId))
+
+  function componentsFor(templateId) {
+    return components.filter((item) => item.template_id === templateId).sort((a, b) => Number(a.component_order || 0) - Number(b.component_order || 0))
+  }
+
+  function totalFor(templateId) {
+    return componentsFor(templateId).filter((item) => item.status !== 'inactive').reduce((sum, item) => sum + Number(item.weight_percent || 0), 0)
+  }
+
+  async function saveTemplate() {
+    if (!newTemplate.name.trim()) return
+    await onCreateTemplate(newTemplate)
+    setNewTemplate({ name: '', description: '', universityId: '', facultyId: '', careerId: '', courseId: '', minPassingGrade: 11 })
+  }
+
+  async function saveComponent() {
+    if (!newComponent.templateId || !newComponent.shortName.trim() || !newComponent.name.trim()) return
+    await onCreateComponent(newComponent)
+    setNewComponent({ templateId: newComponent.templateId, shortName: '', name: '', unitName: '', weightPercent: '', componentOrder: '' })
+  }
+
+  return (
+    <div className="page fade-in">
+      <Header title="Métodos de evaluación" subtitle="Configura las calificaciones por universidad, carrera o curso." />
+      <Card>
+        <h3>Nuevo método de evaluación</h3>
+        <div className="grid three">
+          <input className="input" placeholder="Nombre del método" value={newTemplate.name} onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })} />
+          <input className="input" placeholder="Descripción" value={newTemplate.description} onChange={(e) => setNewTemplate({ ...newTemplate, description: e.target.value })} />
+          <input className="input" inputMode="decimal" placeholder="Nota mínima" value={newTemplate.minPassingGrade} onChange={(e) => setNewTemplate({ ...newTemplate, minPassingGrade: e.target.value })} />
+        </div>
+        <div className="grid three">
+          <select className="input" value={newTemplate.universityId} onChange={(e) => setNewTemplate({ ...newTemplate, universityId: e.target.value, facultyId: '', careerId: '', courseId: '' })}>
+            <option value="">Universidad general</option>
+            {universities.map((u) => <option key={u.id} value={u.id}>{u.code || u.name}</option>)}
+          </select>
+          <select className="input" value={newTemplate.facultyId} onChange={(e) => setNewTemplate({ ...newTemplate, facultyId: e.target.value, careerId: '', courseId: '' })}>
+            <option value="">Facultad general</option>
+            {filteredFaculties.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          <select className="input" value={newTemplate.courseId} onChange={(e) => setNewTemplate({ ...newTemplate, courseId: e.target.value })}>
+            <option value="">Todos los cursos del contexto</option>
+            {filteredCourses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <button className="btn primary small" onClick={saveTemplate}>Crear método</button>
+      </Card>
+
+      <Card>
+        <h3>Agregar componente</h3>
+        <div className="grid three">
+          <select className="input" value={newComponent.templateId} onChange={(e) => setNewComponent({ ...newComponent, templateId: e.target.value })}>
+            <option value="">Selecciona método</option>
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <input className="input" placeholder="Código corto: PC1 / FK1-U1" value={newComponent.shortName} onChange={(e) => setNewComponent({ ...newComponent, shortName: e.target.value })} />
+          <input className="input" placeholder="Nombre completo" value={newComponent.name} onChange={(e) => setNewComponent({ ...newComponent, name: e.target.value })} />
+          <input className="input" placeholder="Unidad / Grupo" value={newComponent.unitName} onChange={(e) => setNewComponent({ ...newComponent, unitName: e.target.value })} />
+          <input className="input" inputMode="decimal" placeholder="Porcentaje" value={newComponent.weightPercent} onChange={(e) => setNewComponent({ ...newComponent, weightPercent: e.target.value })} />
+          <input className="input" inputMode="numeric" placeholder="Orden" value={newComponent.componentOrder} onChange={(e) => setNewComponent({ ...newComponent, componentOrder: e.target.value })} />
+        </div>
+        <button className="btn secondary small" onClick={saveComponent}>Agregar componente</button>
+      </Card>
+
+      <div className="admin-list admin-scroll-list">
+        {templates.map((template) => {
+          const total = totalFor(template.id)
+          return (
+            <Card key={template.id}>
+              <div className="list-row">
+                <div>
+                  <h3>{template.name}</h3>
+                  <p>{template.university?.code || 'General'} · {template.course?.name || template.career?.name || 'Contexto general'} · Nota mínima: {formatNumber(template.min_passing_grade)}</p>
+                </div>
+                <span className={`badge ${template.status}`}>{formatStatus(template.status)}</span>
+              </div>
+              <p className="hint">Total componentes activos: <b className={Math.abs(total - 100) <= 0.01 ? 'ok' : 'bad'}>{formatPercent(total)}%</b></p>
+              <div className="component-list">
+                {componentsFor(template.id).map((component) => (
+                  <div key={component.id} className="component-row">
+                    <span>{component.component_order}. <b>{component.short_name}</b> — {component.name}</span>
+                    <span>{formatPercent(component.weight_percent)}%</span>
+                    <button className="btn ghost small" onClick={() => onUpdateComponent(component.id, { status: component.status === 'active' ? 'inactive' : 'active' })}>{component.status === 'active' ? 'Desactivar' : 'Activar'}</button>
+                  </div>
+                ))}
+              </div>
+              <div className="action-row left">
+                <button className="btn secondary small" disabled={Math.abs(total - 100) > 0.01} onClick={() => onUpdateTemplate(template.id, { status: 'active' })}>Activar</button>
+                <button className="btn ghost small" onClick={() => onUpdateTemplate(template.id, { status: template.status === 'inactive' ? 'draft' : 'inactive' })}>{template.status === 'inactive' ? 'Restaurar' : 'Inactivar'}</button>
+              </div>
+            </Card>
+          )
+        })}
       </div>
     </div>
   )

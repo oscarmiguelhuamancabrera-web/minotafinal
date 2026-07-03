@@ -192,3 +192,120 @@ export function normalizeGradesForDb(grades) {
 function round2(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100
 }
+
+// ============================================================
+// Funciones flexibles para plantillas configurables por universidad
+// ============================================================
+
+export function normalizeEvaluationComponents(components = [], fallbackSettings = DEFAULT_SETTINGS) {
+  if (components && components.length) {
+    return components
+      .filter((item) => item.status !== 'inactive')
+      .sort((a, b) => Number(a.component_order || 0) - Number(b.component_order || 0))
+      .map((item, index) => ({
+        key: item.id || item.key || `component_${index + 1}`,
+        id: item.id,
+        label: item.short_name || item.label || item.name,
+        name: item.name || item.short_name || item.label,
+        group: item.unit_name || item.group || 'Evaluaciones',
+        percent: Number(item.weight_percent ?? item.percent ?? 0)
+      }))
+  }
+  return EVALUATIONS.map((item) => ({
+    key: item.key,
+    id: item.id || item.key,
+    label: item.label,
+    name: item.label,
+    group: item.group,
+    percent: Number(fallbackSettings[item.percentKey] || 0)
+  }))
+}
+
+export function emptyDynamicGrades(items = []) {
+  return Object.fromEntries((items || []).map((item) => [item.key, '']))
+}
+
+export function calculateFlexibleGradeResult(grades, items, minimumGrade = 11) {
+  const components = normalizeEvaluationComponents(items)
+  const total = components.reduce((sum, item) => sum + Number(item.percent || 0), 0)
+  if (Math.abs(total - 100) > 0.05) {
+    return { error: `La suma de porcentajes debe ser 100%. Actualmente es ${formatNumber(total, 2)}%.`, result: null }
+  }
+
+  let currentAverage = 0
+  let evaluatedWeight = 0
+  let pendingWeight = 0
+  const pending = []
+
+  for (const item of components) {
+    const percent = Number(item.percent || 0)
+    const grade = toNumber(grades[item.key])
+    if (grade === null) {
+      pendingWeight += percent
+      pending.push(item)
+      continue
+    }
+    if (grade < 0 || grade > 20) {
+      return { error: `${item.label} debe estar entre 0 y 20.`, result: null }
+    }
+    evaluatedWeight += percent
+    currentAverage += (grade * percent) / 100
+  }
+
+  const minimum = Number(minimumGrade || 11)
+  const requiredAverage = pendingWeight > 0 ? ((minimum - currentAverage) / pendingWeight) * 100 : null
+  const requiredClamped = requiredAverage === null ? null : Math.max(0, requiredAverage)
+  const requiredValues = pending.map((item) => ({ key: item.key, name: item.label, value: requiredClamped }))
+
+  let status = 'Sin notas'
+  let statusClass = 'neutral'
+  let message = 'Ingresa tus notas para calcular tu avance.'
+
+  if (evaluatedWeight > 0 && pendingWeight > 0) {
+    status = currentAverage >= minimum ? 'Aprobando' : 'En proceso'
+    statusClass = currentAverage >= minimum ? 'success' : 'warning'
+    if (requiredClamped > 20) {
+      status = 'En riesgo'
+      statusClass = 'danger'
+      message = 'Con las notas actuales, necesitarías más de 20 en lo pendiente para llegar a la nota mínima.'
+    } else {
+      message = `Necesitas un promedio aproximado de ${formatNumber(requiredClamped)} en las evaluaciones pendientes.`
+    }
+  }
+
+  if (pendingWeight === 0) {
+    status = currentAverage >= minimum ? 'Aprobado' : 'Desaprobado'
+    statusClass = currentAverage >= minimum ? 'success' : 'danger'
+    message = currentAverage >= minimum ? 'Llegaste a la nota mínima aprobatoria.' : 'No llegaste a la nota mínima aprobatoria.'
+  }
+
+  return {
+    error: null,
+    result: {
+      current_average: Number(currentAverage.toFixed(2)),
+      evaluated_weight: Number(evaluatedWeight.toFixed(2)),
+      pending_weight: Number(pendingWeight.toFixed(2)),
+      pending_evaluations: pending.map((item) => item.label).join(', '),
+      required_average: requiredClamped === null ? null : Number(requiredClamped.toFixed(2)),
+      required_values: requiredValues,
+      status,
+      statusClass,
+      message,
+      minimum_grade: minimum
+    }
+  }
+}
+
+export function generateFlexibleMissingGrades(grades, items, minimumGrade = 11) {
+  const calculation = calculateFlexibleGradeResult(grades, items, minimumGrade)
+  if (calculation.error) return calculation
+  const value = calculation.result.required_average
+  if (value === null) return { error: 'No hay evaluaciones pendientes para generar.', result: null }
+  if (value > 20) return { error: 'No es posible aprobar con lo pendiente porque se necesitaría más de 20.', result: null }
+
+  const nextGrades = { ...grades }
+  for (const item of normalizeEvaluationComponents(items)) {
+    if (toNumber(nextGrades[item.key]) === null) nextGrades[item.key] = formatNumber(Math.max(0, value), 2)
+  }
+  return { grades: nextGrades, ...calculateFlexibleGradeResult(nextGrades, items, minimumGrade) }
+}
