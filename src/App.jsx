@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.5'
+const APP_VERSION = '1.1.6'
 
 const emptyAuth = {
   firstName: '',
@@ -128,6 +128,86 @@ function getGoogleProfileName(metadata = {}, fallbackEmail = '') {
     ...parsed,
     fullName
   }
+}
+
+
+function normalizeProfileNameFields(profile = {}) {
+  const first = cleanText(profile.first_name || profile.firstName || '')
+  const last = cleanText(profile.last_name || profile.lastName || '')
+  const full = removeLeadingDuplicateName(cleanText(profile.full_name || profile.fullName || `${first} ${last}`))
+
+  if (first && last && last.toLowerCase().startsWith(`${first.toLowerCase()} `)) {
+    return { firstName: first, lastName: cleanText(last.slice(first.length)) }
+  }
+
+  if (!first && !last && full) return splitFullName(full)
+  if (first && !last && full) {
+    const parsed = splitFullName(full)
+    return { firstName: first, lastName: parsed.lastName || '' }
+  }
+  return { firstName: first, lastName: last }
+}
+
+function normalizeCourseName(value = '') {
+  return cleanText(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, '')
+}
+
+function findSimilarCourses(name = '', courseList = []) {
+  const query = normalizeCourseName(name)
+  if (!query || query.length < 3) return []
+  const queryTokens = query.split(/\s+/).filter(Boolean)
+  return (courseList || [])
+    .map((course) => {
+      const candidate = normalizeCourseName(course.name)
+      const candidateTokens = candidate.split(/\s+/).filter(Boolean)
+      let score = 0
+      if (candidate === query) score += 100
+      if (candidate.includes(query) || query.includes(candidate)) score += 45
+      score += queryTokens.filter((token) => candidateTokens.some((ct) => ct.startsWith(token) || token.startsWith(ct))).length * 18
+      return { course, score }
+    })
+    .filter((item) => item.score >= 18)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map((item) => item.course)
+}
+
+function eventLabel(type) {
+  const labels = {
+    course_added: 'Curso agregado',
+    course_hidden: 'Curso ocultado',
+    course_requested: 'Curso solicitado',
+    calculation_done: 'Cálculo realizado',
+    result_saved: 'Resultado guardado',
+    settings_updated: 'Ajustes modificados',
+    profile_updated: 'Perfil actualizado',
+    template_selected: 'Plantilla seleccionada'
+  }
+  return labels[type] || type || 'Evento'
+}
+
+function isWithinPeriod(value, period = 'today') {
+  if (!value || period === 'all') return true
+  const date = new Date(value)
+  const now = new Date()
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  if (period === 'today') return date >= start
+  if (period === '7d') {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 7)
+    return date >= d
+  }
+  if (period === '30d') {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 30)
+    return date >= d
+  }
+  return true
 }
 
 function formatStatus(status) {
@@ -388,8 +468,39 @@ function App() {
       .eq('status', 'active')
       .order('component_order')
 
-    const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(components || [], settings)
-    setEvaluationTemplate(template)
+    let effectiveTemplate = template
+    let componentRows = components || []
+
+    if (!compError && session?.user?.id && !guestMode && !isAdmin) {
+      const { data: userTemplate } = await supabase
+        .from('user_evaluation_settings')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('template_id', template.id)
+        .maybeSingle()
+
+      if (userTemplate) {
+        effectiveTemplate = {
+          ...template,
+          min_passing_grade: userTemplate.min_passing_grade ?? template.min_passing_grade
+        }
+      }
+
+      const { data: overrides } = await supabase
+        .from('user_evaluation_component_settings')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('template_id', template.id)
+
+      const overrideMap = new Map((overrides || []).map((row) => [row.component_id, row]))
+      componentRows = componentRows.map((component) => ({
+        ...component,
+        weight_percent: overrideMap.get(component.id)?.weight_percent ?? component.weight_percent
+      }))
+    }
+
+    const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(componentRows, settings)
+    setEvaluationTemplate(effectiveTemplate)
     setEvaluationItems(items)
     setGrades(emptyDynamicGrades(items))
     setResult(null)
@@ -532,6 +643,22 @@ function App() {
       career_id: userProfile.career_id,
       cycle_id: userProfile.current_cycle_id,
       user_agent: navigator.userAgent
+    })
+  }
+
+  async function recordUsageEvent(eventType, metadata = {}) {
+    if (!session?.user?.id && !profile?.id) return
+    const userId = session?.user?.id || profile?.id
+    const context = profile || {}
+    await supabase.from('app_usage_events').insert({
+      user_id: userId,
+      event_type: eventType,
+      university_id: metadata.university_id || context.university_id || null,
+      faculty_id: metadata.faculty_id || context.faculty_id || null,
+      career_id: metadata.career_id || context.career_id || null,
+      cycle_id: metadata.cycle_id || context.current_cycle_id || null,
+      course_id: metadata.course_id || null,
+      metadata
     })
   }
 
@@ -825,6 +952,7 @@ function App() {
       return
     }
     setResult(calculation.result)
+    recordUsageEvent('calculation_done', { course_id: selectedCourseId || null, template_id: evaluationTemplate?.id || null })
   }
 
   function handleGenerate() {
@@ -913,6 +1041,7 @@ function App() {
     if (error) notify('error', getErrorMessage(error))
     else {
       notify('success', 'Resultado guardado correctamente.')
+      await recordUsageEvent('result_saved', { course_id: selectedCourseId, template_id: evaluationTemplate?.id || null })
       await loadHistory()
     }
   }
@@ -924,9 +1053,8 @@ function App() {
       return
     }
     if (guest) {
-      localStorage.setItem('mnf_guest_settings', JSON.stringify(newSettings))
       setSettings(newSettings)
-      notify('success', 'Ajustes guardados en este navegador.')
+      notify('success', 'Ajustes aplicados temporalmente. Si actualizas la página, volverán los valores por defecto.')
       return
     }
     const { error: updateError } = await supabase.from('user_settings').upsert({
@@ -987,10 +1115,46 @@ function App() {
         }
       }
       notify('success', 'Plantilla actualizada correctamente.')
+      await recordUsageEvent('settings_updated', { template_id: payload.templateId, scope: 'global' })
       await loadEvaluationTemplates()
       await applyEvaluationTemplate(payload.templateId)
       if (adminData) await loadAdminData()
       return
+    }
+
+    if (!guestMode && session?.user?.id && payload.templateId) {
+      const { error: userTemplateError } = await supabase
+        .from('user_evaluation_settings')
+        .upsert({
+          user_id: session.user.id,
+          template_id: payload.templateId,
+          min_passing_grade: nextTemplate.min_passing_grade,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,template_id' })
+      if (userTemplateError) {
+        notify('error', getErrorMessage(userTemplateError))
+        return
+      }
+
+      const overrideRows = components
+        .filter((component) => component.id)
+        .map((component) => ({
+          user_id: session.user.id,
+          template_id: payload.templateId,
+          component_id: component.id,
+          weight_percent: Number(component.weight_percent || 0),
+          updated_at: new Date().toISOString()
+        }))
+
+      if (overrideRows.length) {
+        const { error: userComponentsError } = await supabase
+          .from('user_evaluation_component_settings')
+          .upsert(overrideRows, { onConflict: 'user_id,component_id' })
+        if (userComponentsError) {
+          notify('error', getErrorMessage(userComponentsError))
+          return
+        }
+      }
     }
 
     setEvaluationTemplate(nextTemplate)
@@ -1002,45 +1166,61 @@ function App() {
     })
     setResult(null)
     if (guestMode) {
-      localStorage.setItem('mnf_guest_template_override', JSON.stringify({ templateId: payload.templateId, minPassingGrade: nextTemplate.min_passing_grade, components }))
-      notify('success', 'Ajustes aplicados localmente en modo invitado.')
+      notify('success', 'Ajustes aplicados temporalmente. Si actualizas la página, volverán los valores por defecto.')
     } else {
-      notify('success', 'Ajustes aplicados para esta sesión.')
+      await recordUsageEvent('settings_updated', { template_id: payload.templateId || evaluationTemplate?.id || null })
+      notify('success', 'Ajustes guardados para tu cuenta.')
     }
   }
 
   async function handleCreateCourse(name, options = {}) {
-    if (!name.trim()) {
-      notify('error', 'Ingresa el nombre del curso.')
+    const proposedName = cleanText(name)
+    if (!proposedName) {
+      notify('error', 'Ingresa el nombre del curso a solicitar.')
       return null
     }
-    if (!profile?.university_id || !profile?.faculty_id || !profile?.career_id || !profile?.current_cycle_id) {
-      notify('error', 'Completa universidad, facultad, carrera y ciclo antes de crear cursos.')
+    if (!profile?.university_id || !profile?.faculty_id || !profile?.career_id) {
+      notify('error', 'Completa universidad, facultad y carrera antes de solicitar cursos.')
       return null
     }
     const targetCycleId = options.cycleId || profile.current_cycle_id
-    const enrollmentType = options.enrollmentType || 'regular'
-    const { data, error } = await supabase.from('courses').insert({
-      name: name.trim(),
-      university_id: profile.university_id,
-      faculty_id: profile.faculty_id,
-      career_id: profile.career_id,
-      cycle_id: targetCycleId,
-      evaluation_template_id: getDefaultTemplateIdForProfile(profile),
-      created_by: profile.id
-    }).select(COURSE_SELECT).single()
-    if (error) {
-      notify('error', 'No se pudo crear el curso. Puede que ya exista para tu carrera y ciclo.')
+    if (!targetCycleId) {
+      notify('error', 'Selecciona el ciclo del curso antes de enviarlo a revisión.')
       return null
     }
-    if (options.addToMyCourses !== false && data?.id) {
-      await handleAddStudentCourse(data.id, enrollmentType, { silent: true, select: options.select })
+
+    const similarCourses = findSimilarCourses(proposedName, availableCourses).slice(0, 5)
+    const { data, error } = await supabase
+      .from('course_requests')
+      .insert({
+        requested_by: profile.id,
+        university_id: profile.university_id,
+        faculty_id: profile.faculty_id,
+        career_id: profile.career_id,
+        cycle_id: targetCycleId,
+        proposed_name: proposedName,
+        enrollment_type: options.enrollmentType || 'regular',
+        status: 'pending',
+        similar_courses: similarCourses.map((course) => ({ id: course.id, name: course.name, cycle_id: course.cycle_id }))
+      })
+      .select('*')
+      .single()
+
+    if (error) {
+      notify('error', 'No se pudo enviar la solicitud del curso. Intenta nuevamente.')
+      return null
     }
-    notify('success', 'Curso creado correctamente y agregado a tus cursos actuales.')
-    await loadCourses()
-    if (options.select && data?.id) {
-      await loadCourseGrades(data.id)
-    }
+
+    await recordUsageEvent('course_requested', {
+      cycle_id: targetCycleId,
+      proposed_name: proposedName,
+      similar_count: similarCourses.length
+    })
+
+    notify('success', similarCourses.length
+      ? 'Solicitud enviada. Encontramos cursos parecidos para que el administrador revise y evite duplicados.'
+      : 'Solicitud enviada. El administrador revisará el curso antes de aprobarlo.')
+    if (adminData) await loadAdminData()
     return data
   }
 
@@ -1071,6 +1251,7 @@ function App() {
       return null
     }
     if (!options.silent) notify('success', 'Curso agregado a Mis cursos actuales.')
+    await recordUsageEvent('course_added', { course_id: courseId, cycle_id: selectedCourse.cycle_id || null, enrollment_type: enrollmentType })
     await loadCourses()
     if (options.select) await loadCourseGrades(courseId)
     return data
@@ -1148,21 +1329,24 @@ function App() {
     if (error) notify('error', getErrorMessage(error))
     else {
       notify('success', 'Perfil actualizado correctamente.')
+      await recordUsageEvent('profile_updated', { university_id: values.universityId, faculty_id: values.facultyId, career_id: values.careerId, cycle_id: values.cycleId })
       await loadProfileAndData(session.user)
     }
   }
 
   async function loadAdminData() {
-    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, templatesRes, componentsRes] = await Promise.all([
+    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, templatesRes, componentsRes, usageRes, requestsRes] = await Promise.all([
       supabase.from('profiles').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
       supabase.from('courses').select(COURSE_SELECT_ADMIN).order('created_at', { ascending: false }),
-      supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), evaluation_template:evaluation_templates(name)').order('created_at', { ascending: false }).limit(200),
-      supabase.from('login_activity').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)').order('login_at', { ascending: false }).limit(300),
-      supabase.from('student_courses').select('*, profile:profiles(first_name,last_name,email, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(500),
+      supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), evaluation_template:evaluation_templates(name)').order('created_at', { ascending: false }).limit(300),
+      supabase.from('login_activity').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)').order('login_at', { ascending: false }).limit(500),
+      supabase.from('student_courses').select('*, profile:profiles(first_name,last_name,email, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(800),
       supabase.from('universities').select('*').order('name'),
       supabase.from('faculties').select('*, university:universities(id,name,code)').order('name'),
       supabase.from('evaluation_templates').select('*, university:universities(name,code), faculty:faculties(name), career:careers(name), course:courses(name)').order('created_at', { ascending: false }),
-      supabase.from('evaluation_components').select('*').order('component_order')
+      supabase.from('evaluation_components').select('*').order('component_order'),
+      supabase.from('app_usage_events').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), course:courses(name)').order('created_at', { ascending: false }).limit(1000),
+      supabase.from('course_requests').select('*, requester:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500)
     ])
 
     setAdminData({
@@ -1174,7 +1358,9 @@ function App() {
       universities: universitiesRes.data || [],
       faculties: facultiesRes.data || [],
       templates: templatesRes.data || [],
-      components: componentsRes.data || []
+      components: componentsRes.data || [],
+      usageEvents: usageRes.data || [],
+      courseRequests: requestsRes.data || []
     })
   }
 
@@ -1677,12 +1863,13 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
     }
   }
 
+  const similarCourses = findSimilarCourses(name, availableCourses)
+
   async function createAndAdd() {
-    const created = await onCreate(name, { cycleId, enrollmentType, select: true })
-    if (created?.id) {
+    const request = await onCreate(name, { cycleId, enrollmentType })
+    if (request?.id) {
       setName('')
       setShowNewCourse(false)
-      onSelect(created.id)
     }
   }
 
@@ -1711,18 +1898,25 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
         </div>
         {selectedAvailable && <p className="hint">Curso seleccionado: {selectedAvailable.name} · Creado por: {creatorName(selectedAvailable)}</p>}
         {filteredAvailable.length === 0 && (
-          <p className="hint warning-hint">No hay cursos oficiales cargados para este contexto académico y ciclo. Puedes crear un curso no listado.</p>
+          <p className="hint warning-hint">No hay cursos oficiales cargados para este contexto académico y ciclo. Puedes solicitar un curso no listado.</p>
         )}
         <div className="action-row left">
           <button className="btn primary small" disabled={!courseId} onClick={addSelectedCourse}>➕ Agregar a Mis cursos</button>
-          <button className="btn ghost small" onClick={() => setShowNewCourse(!showNewCourse)}>+ Crear curso no listado</button>
+          <button className="btn ghost small" onClick={() => setShowNewCourse(!showNewCourse)}>+ Solicitar curso no listado</button>
         </div>
         {showNewCourse && (
           <div className="inline-new-course">
-            <input className="input" placeholder="Nombre del nuevo curso" value={name} onChange={(e) => setName(e.target.value)} />
-            <p className="hint">Se creará para tu carrera y para el ciclo seleccionado. También quedará agregado a Mis cursos.</p>
+            <input className="input" placeholder="Nombre del curso a solicitar" value={name} onChange={(e) => setName(e.target.value)} />
+            <p className="hint">La solicitud quedará pendiente de revisión para evitar duplicados. No se agregará a tu lista hasta que sea aprobada o vinculada por el administrador.</p>
+            {similarCourses.length > 0 && (
+              <div className="similar-box">
+                <b>Cursos similares encontrados</b>
+                {similarCourses.map((course) => <span key={course.id}>{courseCycleName(course)} · {course.name}</span>)}
+                <p className="hint">Revisa si tu curso ya existe antes de enviar la solicitud.</p>
+              </div>
+            )}
             <div className="action-row left">
-              <button className="btn primary small" onClick={createAndAdd}>➕ Crear y usar</button>
+              <button className="btn primary small" onClick={createAndAdd}>Enviar solicitud</button>
               <button className="btn ghost small" onClick={() => { setShowNewCourse(false); setName('') }}>Cancelar</button>
             </div>
           </div>
@@ -1733,9 +1927,9 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
           <span>📚</span>
           <h3>Mis cursos actuales</h3>
         </div>
-        {courses.length === 0 && <Empty text="Aún no agregaste cursos. Usa el buscador superior para seleccionar solo los cursos que llevas." compact />}
+        {filteredCurrentCourses.length === 0 && <Empty text="Aún no agregaste cursos para el ciclo seleccionado." compact />}
         <div className="course-list">
-          {courses.map((course) => (
+          {filteredCurrentCourses.map((course) => (
             <div key={course.id} className="student-course-card">
               <div>
                 <h3>{course.name}</h3>
@@ -1817,47 +2011,16 @@ function EvaluationTemplateCombo({ templates, selectedTemplateId, onSelectTempla
   )
 }
 
-function CourseCombo({ courses, selectedCourseId, onSelectCourse, onCreateCourse, activeCourse }) {
-  const [showNewCourse, setShowNewCourse] = useState(false)
-  const [name, setName] = useState('')
-
-  async function createAndSelect() {
-    const created = await onCreateCourse(name, { select: true })
-    if (created?.id) {
-      setName('')
-      setShowNewCourse(false)
-    }
-  }
-
-  function handleChange(value) {
-    if (value === '__new__') {
-      setShowNewCourse(true)
-      return
-    }
-    setShowNewCourse(false)
-    onSelectCourse(value)
-  }
-
+function CourseCombo({ courses, selectedCourseId, onSelectCourse, activeCourse }) {
   return (
     <Card>
       <label className="label">Curso</label>
-      <select className="input" value={selectedCourseId} onChange={(e) => handleChange(e.target.value)}>
+      <select className="input" value={selectedCourseId} onChange={(e) => onSelectCourse(e.target.value)}>
         <option value="">Selecciona tu curso</option>
         {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-        <option value="__new__">+ Agregar nuevo curso</option>
       </select>
       {activeCourse && <p className="hint">Calculando para: {activeCourse.name}</p>}
-      {courses.length === 0 && <p className="hint">Aún no tienes cursos actuales. Agrega tus cursos desde la sección Cursos.</p>}
-      {showNewCourse && (
-        <div className="inline-new-course">
-          <input className="input" placeholder="Nombre del nuevo curso" value={name} onChange={(e) => setName(e.target.value)} />
-          <div className="action-row left">
-            <button className="btn primary small" onClick={createAndSelect}>➕ Agregar y usar</button>
-            <button className="btn ghost small" onClick={() => { setShowNewCourse(false); setName('') }}>Cancelar</button>
-          </div>
-          <p className="hint">El curso se compartirá con estudiantes de tu misma carrera y ciclo actual.</p>
-        </div>
-      )}
+      {courses.length === 0 && <p className="hint">Aún no tienes cursos actuales. Agrega tus cursos desde la sección Cursos. La calculadora no permite crear cursos nuevos.</p>}
     </Card>
   )
 }
@@ -1990,19 +2153,19 @@ function SettingsScreen({ settings, guestMode, isAdmin, profile, evaluationTempl
           {components.map((item, index) => (
             <label className="setting-card" key={item.id || item.key || index}>
               <span>{item.short_name || item.name}</span>
-              {(isAdmin || guestMode) && <input className="input" value={item.name || ''} onChange={(e) => updateComponent(index, 'name', e.target.value)} placeholder="Nombre" />}
-              <input className="input" inputMode="decimal" value={item.weight_percent ?? ''} onChange={(e) => updateComponent(index, 'weight_percent', e.target.value)} disabled={!isAdmin && !guestMode} />
+              {isAdmin && <input className="input" value={item.name || ''} onChange={(e) => updateComponent(index, 'name', e.target.value)} placeholder="Nombre" />}
+              <input className="input" inputMode="decimal" value={item.weight_percent ?? ''} onChange={(e) => updateComponent(index, 'weight_percent', e.target.value)} />
             </label>
           ))}
         </div>
         <label className="setting-card wide">
           <span>Nota mínima aprobatoria</span>
-          <input className="input" inputMode="decimal" value={minPassingGrade} onChange={(e) => setMinPassingGrade(e.target.value)} disabled={!isAdmin && !guestMode} />
+          <input className="input" inputMode="decimal" value={minPassingGrade} onChange={(e) => setMinPassingGrade(e.target.value)} />
         </label>
-        <p className="hint">La suma de porcentajes debe ser 100%. {isAdmin ? 'Como administrador, estos cambios se guardan para todos los usuarios de la plantilla.' : guestMode ? 'En invitado, los cambios son locales.' : 'Los alumnos usan la configuración de su universidad.'}</p>
-        {(isAdmin || guestMode) && (
+        <p className="hint">La suma de porcentajes debe ser 100%. {isAdmin ? 'Como administrador, estos cambios se guardan para todos los usuarios de la plantilla.' : guestMode ? 'En invitado, los cambios son temporales y se pierden al actualizar.' : 'Los alumnos solo pueden cambiar porcentajes y nota mínima para su cuenta.'}</p>
+        {components.length > 0 && (
           <div className="action-row">
-            <button className="btn primary" onClick={() => onSaveTemplate?.({ templateId, minPassingGrade, components })}>💾 Guardar cambios</button>
+            <button className="btn primary" onClick={() => onSaveTemplate?.({ templateId: templateId || evaluationTemplate?.id, minPassingGrade, components })}>💾 Guardar cambios</button>
           </div>
         )}
       </Card>
@@ -2022,24 +2185,26 @@ function ProfileScreen({ profile, universities, faculties, careers, cycles, onSa
 }
 
 function ProfileForm({ profile, universities, faculties, careers, cycles, onSave, buttonText = 'Guardar perfil' }) {
+  const normalizedName = normalizeProfileNameFields(profile || {})
   const [form, setForm] = useState({
-    firstName: profile?.first_name || '',
-    lastName: profile?.last_name || '',
+    firstName: normalizedName.firstName || '',
+    lastName: normalizedName.lastName || '',
     universityId: profile?.university_id || '',
     facultyId: profile?.faculty_id || '',
     careerId: profile?.career_id || '',
     cycleId: profile?.current_cycle_id || ''
   })
   useEffect(() => {
+    const nextName = normalizeProfileNameFields(profile || {})
     setForm({
-      firstName: profile?.first_name || '',
-      lastName: profile?.last_name || '',
+      firstName: nextName.firstName || '',
+      lastName: nextName.lastName || '',
       universityId: profile?.university_id || '',
       facultyId: profile?.faculty_id || '',
       careerId: profile?.career_id || '',
       cycleId: profile?.current_cycle_id || ''
     })
-  }, [profile?.id, profile?.first_name, profile?.last_name, profile?.university_id, profile?.faculty_id, profile?.career_id, profile?.current_cycle_id])
+  }, [profile?.id, profile?.first_name, profile?.last_name, profile?.full_name, profile?.university_id, profile?.faculty_id, profile?.career_id, profile?.current_cycle_id])
   const filteredFaculties = (faculties || []).filter((faculty) => !form.universityId || faculty.university_id === form.universityId)
   const filteredCareers = (careers || []).filter((career) => !form.facultyId || career.faculty_id === form.facultyId)
   const update = (key, value) => {
@@ -2131,17 +2296,22 @@ function About() {
 
 function AdminDashboard({ data, onLoad, setScreen }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const [filters, setFilters] = useState({ university: '', faculty: '', career: '', cycle: '' })
+  const [filters, setFilters] = useState({ university: '', faculty: '', career: '', cycle: '', period: 'today' })
   const users = data?.users || []
   const courses = data?.courses || []
   const calculations = data?.calculations || []
   const logins = data?.logins || []
   const studentCourses = data?.studentCourses || []
+  const usageEvents = (data?.usageEvents || []).filter((event) => isWithinPeriod(event.created_at, filters.period))
+  const periodLogins = logins.filter((login) => isWithinPeriod(login.login_at, filters.period))
   const todayLogins = logins.filter((login) => login.login_date === todayISO())
   const uniqueToday = new Set(todayLogins.map((login) => login.user_id)).size
-  const hourly = groupByHour(todayLogins)
+  const activeRealUsers = new Set(usageEvents.map((event) => event.user_id)).size
+  const onlyLoginUsers = Math.max(new Set(periodLogins.map((login) => login.user_id)).size - activeRealUsers, 0)
+  const hourly = groupByHour(filters.period === 'today' ? todayLogins : periodLogins)
   const byCareer = countBy(users, (u) => u.career?.name || 'Sin carrera')
   const byCycle = countBy(users, (u) => u.cycle?.name || 'Sin ciclo')
+  const byUsage = countBy(usageEvents, (event) => eventLabel(event.event_type))
 
   const universities = unique([...users, ...courses].map((item) => item.university?.code || item.university?.name).filter(Boolean))
   const faculties = unique([...users, ...courses]
@@ -2180,6 +2350,8 @@ function AdminDashboard({ data, onLoad, setScreen }) {
         <StatCard icon="🔐" label="Accesos del día" value={todayLogins.length} />
         <StatCard icon="📚" label="Cursos creados" value={courses.length} />
         <StatCard icon="🧾" label="Cursos en listas de alumnos" value={studentCourses.length} />
+        <StatCard icon="🔥" label="Usuarios con uso real" value={activeRealUsers} />
+        <StatCard icon="👀" label="Solo iniciaron sesión" value={onlyLoginUsers} />
         <StatCard icon="📊" label="Cálculos guardados" value={calculations.length} />
       </div>
       <div className="grid two">
@@ -2187,11 +2359,18 @@ function AdminDashboard({ data, onLoad, setScreen }) {
         <Card><h3>Usuarios por carrera</h3><BarChart data={byCareer} /></Card>
         <Card><h3>Usuarios por ciclo</h3><BarChart data={byCycle} /></Card>
         <Card><h3>Cursos por tipo de matrícula</h3><BarChart data={byEnrollmentType} /></Card>
+        <Card><h3>Uso real de la app</h3><BarChart data={byUsage} /></Card>
         <Card><h3>Usuarios que iniciaron sesión hoy</h3><RecentLogins items={todayLogins} /></Card>
       </div>
       <Card>
         <h3>Distribución por carrera y ciclo</h3>
         <div className="filters admin-course-filters">
+          <select className="input" value={filters.period} onChange={(e) => setFilters({ ...filters, period: e.target.value })}>
+            <option value="today">Hoy</option>
+            <option value="7d">Últimos 7 días</option>
+            <option value="30d">Últimos 30 días</option>
+            <option value="all">Todo</option>
+          </select>
           <select className="input" value={filters.university} onChange={(e) => setFilters({ ...filters, university: e.target.value, faculty: '', career: '' })}>
             <option value="">Todas las universidades</option>{universities.map((u) => <option key={u}>{u}</option>)}
           </select>
@@ -2208,6 +2387,10 @@ function AdminDashboard({ data, onLoad, setScreen }) {
         <div className="admin-scroll-list">
           <ResponsiveTable rows={distribution} columns={['carrera', 'ciclo', 'usuarios', 'cursos', 'calculos']} />
         </div>
+      </Card>
+      <Card>
+        <h3>Solicitudes de cursos no listados</h3>
+        <CourseRequestsSummary items={data?.courseRequests || []} />
       </Card>
       <div className="grid three">
         <button className="btn secondary" onClick={() => setScreen('admin-users')}>👥 Gestionar usuarios</button>
@@ -2457,13 +2640,33 @@ function AdminEvaluations({ data, onLoad, onCreateTemplate, onUpdateTemplate, on
   )
 }
 
+function CourseRequestsSummary({ items = [] }) {
+  const pending = items.filter((item) => item.status === 'pending').slice(0, 8)
+  if (!pending.length) return <Empty text="No hay solicitudes pendientes de cursos." compact />
+  return (
+    <div className="recent-list admin-scroll-list compact-list">
+      {pending.map((item) => (
+        <div key={item.id}>
+          <b>{item.proposed_name}</b>
+          <span>{fullName(item.requester)} · {item.university?.code || item.university?.name} · {item.career?.name} · {item.cycle?.name} · {dateOnly(item.created_at)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function RecentLogins({ items }) {
   if (!items.length) return <Empty text="Aún no hay accesos registrados hoy." compact />
   return <div className="recent-list">{items.map((item) => <div key={item.id}><b>{fullName(item.profile)}</b><span>{item.career?.name || 'Sin carrera'} · {item.cycle?.name || 'Sin ciclo'} · {timeOnly(item.login_at)}</span></div>)}</div>
 }
 
-function BarChart({ data }) {
-  const entries = Object.entries(data || {})
+function BarChart({ data, limit = 8 }) {
+  let entries = Object.entries(data || {}).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+  if (entries.length > limit) {
+    const top = entries.slice(0, limit)
+    const other = entries.slice(limit).reduce((sum, [, value]) => sum + Number(value || 0), 0)
+    entries = other > 0 ? [...top, ['Otros', other]] : top
+  }
   if (!entries.length) return <Empty text="Sin datos suficientes." compact />
   const max = Math.max(...entries.map(([, value]) => value), 1)
   return <div className="bar-chart">{entries.map(([label, value]) => <div className="bar-row" key={label}><span>{label}</span><div><i style={{ width: `${(value / max) * 100}%` }} /></div><b>{value}</b></div>)}</div>
@@ -2545,12 +2748,7 @@ function Footer() {
 }
 
 function loadGuestSettings() {
-  try {
-    const saved = localStorage.getItem('mnf_guest_settings')
-    return saved ? JSON.parse(saved) : DEFAULT_SETTINGS
-  } catch {
-    return DEFAULT_SETTINGS
-  }
+  return DEFAULT_SETTINGS
 }
 
 export default App

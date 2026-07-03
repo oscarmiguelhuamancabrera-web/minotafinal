@@ -1,27 +1,28 @@
-# Mi Nota Final Web v1.1.5
+# Mi Nota Final Web v1.1.6
 
-Versión: `MiNotaFinalWeb_v1_1_5_logica_calculadora_ajustes`
+Versión de estabilización y control de uso real.
 
 ## Cambios principales
 
-- Calculadora automática según universidad/curso para alumnos registrados.
-- Selector de calculadora solo para admin/superadmin e invitado.
-- Ajustes con la misma lógica que la calculadora:
-  - Alumno: usa la plantilla de su universidad/curso.
-  - Admin/superadmin: puede seleccionar plantilla y editar porcentajes globales.
-  - Invitado: puede seleccionar plantilla y ajustar porcentajes localmente.
-- Porcentajes cargados desde `evaluation_templates` y `evaluation_components`.
-- Admin Dashboard: filtros en “Distribución por carrera y ciclo”.
-- Mis cursos actuales se filtra por el ciclo seleccionado.
-- Incluye carga de malla UAI Medicina Humana de I a XIV ciclo.
-- Mantiene fix de relación explícita de `evaluation_templates!courses_evaluation_template_id_fkey`.
+- Corrección del prellenado de nombres/apellidos de Google en **Completa tu perfil**.
+- Modo invitado: ajustes temporales; si recarga la página, vuelve a valores por defecto.
+- Alumno registrado: puede cambiar solo porcentajes y nota mínima para su cuenta.
+- Alumno no puede cambiar nombres de evaluaciones ni componentes.
+- Admin/superadmin: puede editar plantillas globales.
+- Calculadora: ya no permite crear cursos nuevos; solo seleccionar cursos existentes.
+- Cursos no listados: ahora se solicitan para revisión del administrador.
+- Validación de cursos similares para evitar duplicados como “Geo” vs “Geometría Analítica”.
+- Registro de quién solicita cursos nuevos.
+- Analítica de uso real: cálculo realizado, resultado guardado, curso agregado, ajustes modificados, etc.
+- Dashboard admin con métricas de usuarios con uso real y usuarios que solo iniciaron sesión.
+- Gráficos del admin con mejor orden, top y agrupación “Otros”.
 
 ## SQL requerido
 
-Ejecutar en Supabase:
+Ejecutar primero en Supabase:
 
 ```text
-supabase/migration_v1_1_5_logica_calculadora_ajustes.sql
+supabase/migration_v1_1_6_mejoras_uso_cursos.sql
 ```
 
 ## Publicación
@@ -29,7 +30,7 @@ supabase/migration_v1_1_5_logica_calculadora_ajustes.sql
 ```bash
 git status
 git add .
-git commit -m "Version 1.1.5 logica calculadora y ajustes por universidad"
+git commit -m "Version 1.1.6 mejoras uso real y control cursos"
 git push origin main
 ```
 

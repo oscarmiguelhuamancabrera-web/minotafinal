@@ -534,3 +534,23 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   font-size: 0.86rem;
   color: #4b2aa0;
 }
+
+.similar-box {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px dashed rgba(126, 58, 242, 0.35);
+  border-radius: 16px;
+  background: rgba(126, 58, 242, 0.06);
+  display: grid;
+  gap: 6px;
+}
+
+.similar-box span {
+  display: block;
+  font-size: 0.92rem;
+  color: #4c1d95;
+}
+
+.compact-list {
+  max-height: 320px;
+}
