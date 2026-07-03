@@ -14,7 +14,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.0.0'
+const APP_VERSION = '1.0.5'
 
 const emptyAuth = {
   firstName: '',
@@ -105,7 +105,7 @@ function App() {
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
   const [adminData, setAdminData] = useState(null)
-  const [screen, setScreen] = useState('welcome')
+  const [screen, setScreen] = useState('login')
   const [guestMode, setGuestMode] = useState(false)
   const [notice, setNotice] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -127,7 +127,7 @@ function App() {
         setCourses([])
         setHistory([])
         setSelectedCourseId('')
-        if (!guestMode) setScreen('welcome')
+        if (!guestMode) setScreen('login')
       }
     })
     return () => listener?.subscription?.unsubscribe()
@@ -583,14 +583,18 @@ function App() {
     <div className="app-shell">
       {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
       <main className="app-container">
-        {!session && !guestMode && screen === 'welcome' && (
-          <Welcome onLogin={() => setScreen('login')} onRegister={() => setScreen('register')} onGuest={enterGuestMode} onGoogle={handleGoogleLogin} onMicrosoft={handleMicrosoftLogin} />
-        )}
-        {!session && !guestMode && screen === 'login' && (
-          <Login onSubmit={handleLogin} onReset={handlePasswordReset} onGoogle={handleGoogleLogin} onMicrosoft={handleMicrosoftLogin} onRegister={() => setScreen('register')} onBack={() => setScreen('welcome')} />
+        {!session && !guestMode && (screen === 'login' || screen === 'welcome') && (
+          <Login
+            onSubmit={handleLogin}
+            onReset={handlePasswordReset}
+            onGoogle={handleGoogleLogin}
+            onMicrosoft={handleMicrosoftLogin}
+            onRegister={() => setScreen('register')}
+            onGuest={enterGuestMode}
+          />
         )}
         {!session && !guestMode && screen === 'register' && (
-          <Register careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('welcome')} />
+          <Register careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('login')} />
         )}
         {session && screen === 'complete-profile' && (
           <CompleteProfile careers={careers} cycles={cycles} profile={profile} onSubmit={handleUpdateProfile} />
@@ -721,18 +725,22 @@ function OnboardingTutorial({ onStart, onSkip }) {
   )
 }
 
-function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onBack }) {
+function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   return (
-    <AuthCard title="Iniciar sesión" onBack={onBack}>
+    <AuthCard title="Mi Nota Final" className="login-card">
+      <p className="auth-subtitle">Ingresa tus datos o continúa con una cuenta social.</p>
       <input className="input" type="email" placeholder="Correo electrónico" value={email} onChange={(e) => setEmail(e.target.value)} />
       <input className="input" type="password" placeholder="Contraseña" value={password} onChange={(e) => setPassword(e.target.value)} />
       <button className="btn primary" onClick={() => onSubmit(email, password)}>Ingresar</button>
       <SocialButton provider="google" onClick={onGoogle}>Continuar con Google</SocialButton>
       <SocialButton provider="microsoft" onClick={onMicrosoft}>Continuar con Microsoft</SocialButton>
-      <button className="btn link" onClick={() => onReset(email)}>Olvidé mi contraseña</button>
-      <button className="btn ghost" onClick={onRegister}>Crear cuenta nueva</button>
+      <div className="auth-links">
+        <button className="btn link" onClick={() => onReset(email)}>Olvidé mi contraseña</button>
+        <button className="btn link" onClick={onRegister}>Crear cuenta nueva</button>
+      </div>
+      <button className="btn ghost full" onClick={onGuest}>Continuar como invitado</button>
       <p className="hint">Si acabas de registrarte, confirma tu correo antes de iniciar sesión. Revisa también spam o correo no deseado.</p>
     </AuthCard>
   )
@@ -766,10 +774,10 @@ function Register({ careers, cycles, onSubmit, onBack }) {
   )
 }
 
-function AuthCard({ title, children, onBack }) {
+function AuthCard({ title, children, onBack, className = '' }) {
   return (
-    <section className="auth-card">
-      <button className="back" onClick={onBack}>← Volver</button>
+    <section className={`auth-card ${className}`.trim()}>
+      {onBack && <button className="back" onClick={onBack}>← Volver</button>}
       <img className="mini-logo" src="/logo.png" alt="Mi Nota Final" />
       <h1>{title}</h1>
       <div className="stack">{children}</div>
@@ -1393,7 +1401,7 @@ function ResponsiveTable({ rows, columns }) {
 }
 
 function Footer() {
-  return <footer>Desarrollado por: Ing. Oscar Huamán</footer>
+  return null
 }
 
 function loadGuestSettings() {

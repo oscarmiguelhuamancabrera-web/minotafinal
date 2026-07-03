@@ -2,14 +2,13 @@
 
 Aplicación Web/PWA para calcular notas académicas, guardar cursos, registrar historial en Supabase y usarla desde Android, iOS o PC mediante un enlace.
 
-**Versión:** 1.0.0  
-**Desarrollado por:** Ing. Oscar Huamán
+**Versión:** 1.0.5
 
 ## Cambios de esta versión
 
 - Diseño responsive optimizado para celular.
 - Registro separado por **nombres** y **apellidos**.
-- Saludo del dashboard solo con el primer nombre: `Hola, Oscar`.
+- Saludo del dashboard solo con el primer nombre: `Hola, [Nombre]`.
 - Selección de **carrera** y **ciclo académico**.
 - Cursos compartidos por **carrera + ciclo**.
 - El administrador puede ver quién creó cursos, editar nombres, dar de baja y reactivar.
@@ -63,7 +62,7 @@ supabase/schema.sql
 El administrador inicial configurado es:
 
 ```text
-oscar.miguel.huaman.cabrera@gmail.com
+[correo administrador configurado en Supabase]
 ```
 
 Cuando ese correo se registre y confirme, el sistema lo marcará como administrador.
@@ -222,3 +221,10 @@ Ejecutar en Supabase antes de usar esta versión:
 ```sql
 supabase/migration_v1_0_3_courses_tutorial_social.sql
 ```
+
+
+## Cambios v1.0.5
+
+- Se eliminó la firma visible en toda la aplicación.
+- Se retiró cualquier referencia de autor en pantallas visibles y documentación pública.
+- La aplicación queda presentada como una herramienta anónima de apoyo académico.

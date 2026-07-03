@@ -400,3 +400,32 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   .social-button { grid-template-columns: 34px 1fr 34px; }
   .tutorial-steps > div { grid-template-columns: 36px 1fr; }
 }
+
+
+/* Ajustes v1.0.5 - acceso unificado */
+.login-card {
+  max-width: 440px;
+}
+.auth-subtitle {
+  margin: -4px 0 2px;
+  font-weight: 700;
+}
+.auth-links {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.auth-links .btn {
+  padding-left: 0;
+  padding-right: 0;
+  min-height: auto;
+}
+@media (max-width: 520px) {
+  .login-card {
+    width: min(96vw, 430px);
+  }
+  .auth-links {
+    justify-content: center;
+  }
+}
