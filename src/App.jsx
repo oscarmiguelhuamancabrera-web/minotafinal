@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.2'
+const APP_VERSION = '1.1.4'
 
 const emptyAuth = {
   firstName: '',
@@ -162,8 +162,8 @@ function creatorName(course) {
   return 'Sistema'
 }
 
-const COURSE_SELECT = 'id,name,created_by,status,cycle_id,career_id,faculty_id,university_id,evaluation_template_id,created_at,updated_at,university:universities(id,name,code),faculty:faculties(id,name),career:careers(id,name),cycle:cycles(id,name,order_number),evaluation_template:evaluation_templates(id,name,min_passing_grade)'
-const COURSE_SELECT_ADMIN = 'id,name,created_by,status,cycle_id,career_id,faculty_id,university_id,evaluation_template_id,created_at,updated_at,university:universities(id,name,code),faculty:faculties(id,name),career:careers(id,name),cycle:cycles(id,name,order_number),evaluation_template:evaluation_templates(id,name)'
+const COURSE_SELECT = 'id,name,created_by,status,cycle_id,career_id,faculty_id,university_id,evaluation_template_id,created_at,updated_at,university:universities(id,name,code),faculty:faculties(id,name),career:careers(id,name),cycle:cycles(id,name,order_number),evaluation_template:evaluation_templates!courses_evaluation_template_id_fkey(id,name,min_passing_grade)'
+const COURSE_SELECT_ADMIN = 'id,name,created_by,status,cycle_id,career_id,faculty_id,university_id,evaluation_template_id,created_at,updated_at,university:universities(id,name,code),faculty:faculties(id,name),career:careers(id,name),cycle:cycles(id,name,order_number),evaluation_template:evaluation_templates!courses_evaluation_template_id_fkey(id,name)'
 
 function universityName(item) {
   return item?.university?.name || 'Sin universidad'
@@ -246,6 +246,7 @@ function App() {
   const [grades, setGrades] = useState(emptyGrades())
   const [evaluationTemplate, setEvaluationTemplate] = useState(null)
   const [evaluationItems, setEvaluationItems] = useState(normalizeEvaluationComponents([], settings))
+  const [evaluationTemplates, setEvaluationTemplates] = useState([])
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
   const [adminData, setAdminData] = useState(null)
@@ -285,7 +286,7 @@ function App() {
 
   async function initialize() {
     setLoading(true)
-    await Promise.all([loadUniversities(), loadFaculties(), loadCareers(), loadCycles()])
+    await Promise.all([loadUniversities(), loadFaculties(), loadCareers(), loadCycles(), loadEvaluationTemplates()])
     const { data } = await supabase.auth.getSession()
     setSession(data.session)
     if (data.session?.user) {
@@ -317,6 +318,74 @@ function App() {
   async function loadCycles() {
     const { data, error } = await supabase.from('cycles').select('*').eq('status', 'active').order('order_number')
     if (!error) setCycles(data || [])
+  }
+
+  async function loadEvaluationTemplates() {
+    const { data, error } = await supabase
+      .from('evaluation_templates')
+      .select('id,name,description,min_passing_grade,scale_min,scale_max,status,university_id,faculty_id,career_id,course_id,university:universities(id,name,code),faculty:faculties(id,name),career:careers(id,name)')
+      .eq('status', 'active')
+      .order('created_at', { ascending: true })
+    if (error) {
+      console.error('No se pudieron cargar plantillas de evaluación:', error)
+      setEvaluationTemplates([])
+      return []
+    }
+    const templates = data || []
+    setEvaluationTemplates(templates)
+    return templates
+  }
+
+  async function applyEvaluationTemplate(templateId) {
+    if (!templateId) {
+      const fallback = normalizeEvaluationComponents([], settings)
+      setEvaluationTemplate(null)
+      setEvaluationItems(fallback)
+      setGrades(emptyDynamicGrades(fallback))
+      setResult(null)
+      return
+    }
+
+    let template = evaluationTemplates.find((item) => item.id === templateId) || null
+    if (!template) {
+      const { data } = await supabase
+        .from('evaluation_templates')
+        .select('id,name,description,min_passing_grade,scale_min,scale_max,status,university_id,faculty_id,career_id,course_id,university:universities(id,name,code),faculty:faculties(id,name),career:careers(id,name)')
+        .eq('id', templateId)
+        .maybeSingle()
+      template = data || null
+    }
+
+    if (!template?.id) return
+
+    const { data: components, error: compError } = await supabase
+      .from('evaluation_components')
+      .select('*')
+      .eq('template_id', template.id)
+      .eq('status', 'active')
+      .order('component_order')
+
+    const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(components || [], settings)
+    setEvaluationTemplate(template)
+    setEvaluationItems(items)
+    setGrades(emptyDynamicGrades(items))
+    setResult(null)
+  }
+
+  function templatesForCurrentCalculator() {
+    const templates = evaluationTemplates || []
+    if (guestMode) return templates
+
+    const context = activeCourse || profile
+    if (!context?.university_id) return templates
+
+    return templates.filter((template) => {
+      const matchesUniversity = !template.university_id || template.university_id === context.university_id
+      const matchesFaculty = !template.faculty_id || !context.faculty_id || template.faculty_id === context.faculty_id
+      const matchesCareer = !template.career_id || !context.career_id || template.career_id === context.career_id
+      const matchesCourse = !template.course_id || !activeCourse?.id || template.course_id === activeCourse.id
+      return matchesUniversity && matchesFaculty && matchesCareer && matchesCourse
+    })
   }
 
   function isAdminRole(role) {
@@ -695,15 +764,27 @@ function App() {
     else notify('success', 'Te enviamos un enlace para recuperar tu contraseña. Revisa tu correo.')
   }
 
-  function enterGuestMode() {
+  async function enterGuestMode() {
     setGuestMode(true)
     setProfile(null)
-    setSettings(loadGuestSettings())
+    const guestSettings = loadGuestSettings()
+    setSettings(guestSettings)
     setCourses([])
     setAvailableCourses([])
-    setGrades(emptyDynamicGrades(evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)))
+    setSelectedCourseId('')
     setResult(null)
     setScreen('guest-calculator')
+
+    const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
+    const defaultTemplate = templates.find((template) => template.university?.code === 'UPSJB') || templates[0]
+    if (defaultTemplate?.id) {
+      await applyEvaluationTemplate(defaultTemplate.id)
+    } else {
+      const fallback = normalizeEvaluationComponents([], guestSettings)
+      setEvaluationTemplate(null)
+      setEvaluationItems(fallback)
+      setGrades(emptyDynamicGrades(fallback))
+    }
   }
 
   function handleCalculate() {
@@ -1150,8 +1231,10 @@ function App() {
                 onClean={handleClean}
                 onSave={null}
                 guestMode
-                evaluationTemplate={null}
-                evaluationItems={normalizeEvaluationComponents([], settings)}
+                evaluationTemplate={evaluationTemplate}
+                evaluationItems={evaluationItems}
+                evaluationTemplates={evaluationTemplates}
+                onSelectTemplate={applyEvaluationTemplate}
               />
             )}
             {guestMode && screen === 'guest-settings' && <SettingsScreen settings={settings} onSave={(s) => handleSaveSettings(s, true)} guestMode />}
@@ -1176,6 +1259,8 @@ function App() {
                 activeCourse={activeCourse}
                 evaluationTemplate={evaluationTemplate}
                 evaluationItems={evaluationItems}
+                evaluationTemplates={templatesForCurrentCalculator()}
+                onSelectTemplate={applyEvaluationTemplate}
               />
             )}
             {session && screen === 'history' && <HistoryScreen history={history} />}
@@ -1541,7 +1626,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   )
 }
 
-function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems }) {
+function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate }) {
   const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
   const groups = [...new Set(items.map((item) => item.group || 'Evaluaciones'))]
   const updateGrade = (key, value) => setGrades((prev) => ({ ...prev, [key]: value }))
@@ -1549,6 +1634,14 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
   return (
     <div className="page fade-in">
       <Header title={title} subtitle={subtitle} />
+      {evaluationTemplates.length > 0 && (
+        <EvaluationTemplateCombo
+          templates={evaluationTemplates}
+          selectedTemplateId={evaluationTemplate?.id || ''}
+          onSelectTemplate={onSelectTemplate}
+          guestMode={guestMode}
+        />
+      )}
       {!guestMode && (
         <CourseCombo
           courses={courses}
@@ -1558,7 +1651,7 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
           activeCourse={activeCourse}
         />
       )}
-      {evaluationTemplate && <Card><p className="hint"><b>Método de evaluación:</b> {evaluationTemplate.name}</p></Card>}
+      {evaluationTemplate && <Card><p className="hint"><b>Método de evaluación:</b> {evaluationTemplate.name} · <b>Nota mínima:</b> {formatNumber(evaluationTemplate.min_passing_grade || settings.minimum_grade)}</p></Card>}
       {groups.map((group) => (
         <EvaluationSection key={group} title={group} items={items.filter((item) => item.group === group)} grades={grades} settings={settings} updateGrade={updateGrade} flexible />
       ))}
@@ -1570,6 +1663,30 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
       {onSave && <button className="btn secondary full" onClick={onSave}>💾 Guardar resultado</button>}
       {result && <ResultCard result={result} />}
     </div>
+  )
+}
+
+function EvaluationTemplateCombo({ templates, selectedTemplateId, onSelectTemplate, guestMode }) {
+  const groupedLabel = (template) => {
+    const university = template.university?.code || template.university?.name || 'General'
+    return `${university} · ${template.name}`
+  }
+
+  return (
+    <Card>
+      <label className="label">{guestMode ? 'Selecciona la calculadora' : 'Plantilla de evaluación'}</label>
+      <select
+        className="input"
+        value={selectedTemplateId}
+        onChange={(e) => onSelectTemplate?.(e.target.value)}
+      >
+        <option value="">Selecciona una plantilla</option>
+        {templates.map((template) => (
+          <option key={template.id} value={template.id}>{groupedLabel(template)}</option>
+        ))}
+      </select>
+      <p className="hint">Los porcentajes se cargan desde la configuración del administrador. No están fijos en la app.</p>
+    </Card>
   )
 }
 
