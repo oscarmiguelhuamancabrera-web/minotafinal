@@ -780,10 +780,16 @@ function App() {
       return
     }
 
-    await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id)])
-    await loadUserCommunication(normalizedNameProfile)
+    // Admin/superadmin: cargar siempre la data administrativa al iniciar sesión o refrescar.
+    // Antes, si el perfil admin ya existía, las sugerencias podían guardarse en BD
+    // pero no aparecer en el panel del superadmin hasta otra recarga/cambio interno.
+    if (isAdminRole(normalizedNameProfile.role)) {
+      await loadSettings(user.id)
+      await loadAdminData()
+    } else {
+      await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id)])
+      await loadUserCommunication(normalizedNameProfile)
 
-    if (!isAdminRole(normalizedProfile.role)) {
       const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
       const defaultTemplate = findBestTemplateForContext(normalizedNameProfile, null, templates)
       if (defaultTemplate?.id) await applyEvaluationTemplate(defaultTemplate.id)

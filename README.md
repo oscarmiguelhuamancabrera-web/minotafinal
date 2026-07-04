@@ -64,3 +64,10 @@ Antes de publicar, vuelve a ejecutar:
 ```sql
 supabase/migration_v1_1_8_anuncios_sugerencias.sql
 ```
+
+
+## Fix modal 2
+
+- Corrige la carga de sugerencias para admin/superadmin.
+- El panel de comunicación refresca la data administrativa al abrirse.
+- Las sugerencias enviadas por alumnos se muestran al superadmin desde Comunicación → Sugerencias.
