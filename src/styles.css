@@ -619,3 +619,136 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
 .badge.reviewing { background: #dbeafe; color: #1d4ed8; }
 .badge.resolved { background: #dcfce7; color: #166534; }
 .badge.rejected { background: #fee2e2; color: #991b1b; }
+
+/* Corrección v1.1.8-fix-modal: ventana flotante de anuncios */
+.desktop-nav button.active {
+  color: #5b21b6;
+  background: rgba(126, 58, 242, 0.10);
+}
+
+.modal-config-box {
+  padding: 14px;
+  border: 1px dashed rgba(126, 58, 242, 0.35);
+  border-radius: 18px;
+  background: rgba(126, 58, 242, 0.06);
+  display: grid;
+  gap: 12px;
+}
+
+.modal-image-preview {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.modal-image-preview img,
+.announcement-thumb {
+  max-width: 260px;
+  max-height: 180px;
+  border-radius: 16px;
+  border: 1px solid #eadcff;
+  object-fit: contain;
+  background: #fff;
+}
+
+.floating-announcement-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(17, 24, 39, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.floating-announcement {
+  width: min(92vw, 620px);
+  max-height: 92vh;
+  overflow: hidden;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(17, 24, 39, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.floating-announcement.image-mode {
+  width: min(92vw, 600px);
+  background: #111827;
+}
+
+.floating-announcement-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: #25194f;
+  color: #fff;
+  font-weight: 900;
+}
+
+.floating-announcement-header button {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.floating-announcement-image {
+  display: block;
+  width: 100%;
+  max-height: calc(92vh - 56px);
+  object-fit: contain;
+  background: #111827;
+}
+
+.floating-announcement-body {
+  padding: 26px;
+  display: grid;
+  gap: 14px;
+}
+
+.floating-announcement-body h2 {
+  margin: 0;
+  color: #4c1d95;
+  font-size: clamp(1.6rem, 5vw, 2.5rem);
+}
+
+.floating-announcement-body p {
+  margin: 0;
+  color: #675b7c;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.floating-announcement-content {
+  white-space: pre-line;
+  line-height: 1.55;
+  color: #39295a;
+  background: #faf7ff;
+  border: 1px solid #eadcff;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+@media (max-width: 720px) {
+  .floating-announcement-backdrop {
+    padding: 10px;
+    align-items: center;
+  }
+  .floating-announcement {
+    width: 96vw;
+    border-radius: 18px;
+  }
+  .floating-announcement-body {
+    padding: 18px;
+  }
+  .announcement-thumb {
+    max-width: 100%;
+  }
+}

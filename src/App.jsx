@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.8'
+const APP_VERSION = '1.1.8-fix-modal'
 
 const emptyAuth = {
   firstName: '',
@@ -278,10 +278,62 @@ function formatAnnouncementType(type) {
 function formatDisplayMode(mode) {
   const labels = {
     banner: 'Banner',
-    modal: 'Modal',
+    modal: 'Ventana flotante',
     card: 'Tarjeta'
   }
   return labels[mode] || mode || 'Tarjeta'
+}
+
+function formatRepeatMode(mode) {
+  const labels = {
+    once: 'Una vez por usuario',
+    daily: 'Una vez al día',
+    always: 'Cada vez que ingresa'
+  }
+  return labels[mode] || labels.once
+}
+
+function shouldShowFloatingAnnouncement(announcement, closedIds = []) {
+  if (!announcement || announcement.display_mode !== 'modal') return false
+  if (closedIds.includes(announcement.id)) return false
+  const repeatMode = announcement.repeat_mode || 'once'
+  if (repeatMode === 'always') return true
+  const dismissedAt = announcement.read?.dismissed_at
+  if (!dismissedAt) return true
+  if (repeatMode === 'daily') {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const dismissedDate = new Date(dismissedAt)
+    return dismissedDate < today
+  }
+  return false
+}
+
+function fileToAnnouncementImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve('')
+    if (!file.type?.startsWith('image/')) return reject(new Error('Selecciona una imagen válida.'))
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'))
+    reader.onload = () => {
+      const image = new Image()
+      image.onerror = () => reject(new Error('No se pudo procesar la imagen.'))
+      image.onload = () => {
+        const maxWidth = 900
+        const scale = Math.min(1, maxWidth / image.width)
+        const width = Math.max(1, Math.round(image.width * scale))
+        const height = Math.max(1, Math.round(image.height * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(image, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', 0.82))
+      }
+      image.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  })
 }
 
 function announcementPriorityWeight(priority) {
@@ -419,6 +471,7 @@ function App() {
   const [adminData, setAdminData] = useState(null)
   const [announcements, setAnnouncements] = useState([])
   const [suggestions, setSuggestions] = useState([])
+  const [closedModalIds, setClosedModalIds] = useState([])
   const [screen, setScreen] = useState('login')
   const [guestMode, setGuestMode] = useState(false)
   const [notice, setNotice] = useState(null)
@@ -1704,12 +1757,20 @@ function App() {
       notify('error', 'Completa título y resumen del anuncio.')
       return false
     }
+    const modalContentType = payload.displayMode === 'modal' ? (payload.modalContentType || 'text') : 'text'
+    if (payload.displayMode === 'modal' && modalContentType === 'image' && !payload.modalImageUrl) {
+      notify('error', 'Sube una imagen para la ventana flotante.')
+      return false
+    }
     const { error } = await supabase.from('announcements').insert({
       title: payload.title.trim(),
       summary: payload.summary.trim(),
       content: payload.content?.trim() || null,
       type: payload.type || 'info',
       display_mode: payload.displayMode || 'card',
+      modal_content_type: modalContentType,
+      modal_image_url: payload.displayMode === 'modal' && modalContentType === 'image' ? payload.modalImageUrl : null,
+      repeat_mode: payload.repeatMode || 'once',
       priority: payload.priority || 'normal',
       status: payload.status || 'active',
       starts_at: payload.startsAt || null,
@@ -1779,11 +1840,23 @@ function App() {
     return base
   }, [session, guestMode])
 
+  const floatingAnnouncement = useMemo(
+    () => !isAdmin && !guestMode ? announcements.find((item) => shouldShowFloatingAnnouncement(item, closedModalIds)) : null,
+    [announcements, closedModalIds, isAdmin, guestMode]
+  )
+
+  async function closeFloatingAnnouncement(announcementId) {
+    if (!announcementId) return
+    setClosedModalIds((current) => current.includes(announcementId) ? current : [...current, announcementId])
+    await dismissAnnouncement(announcementId)
+  }
+
   if (loading) return <Splash />
 
   return (
     <div className="app-shell">
       {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
+      {floatingAnnouncement && <FloatingAnnouncementModal announcement={floatingAnnouncement} onClose={() => closeFloatingAnnouncement(floatingAnnouncement.id)} />}
       <main className="app-container">
         {!session && !guestMode && (screen === 'login' || screen === 'welcome') && (
           <Login
@@ -2081,13 +2154,14 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
           </div>
         </div>
         <nav className="desktop-nav">
-          {!guestMode && <button onClick={() => setScreen('dashboard')}>Inicio</button>}
-          {!guestMode && <button onClick={() => setScreen('courses')}>Cursos</button>}
-          <button onClick={() => setScreen(guestMode ? 'guest-calculator' : 'calculator')}>Calcular</button>
-          {!guestMode && <button onClick={() => setScreen('history')}>Historial</button>}
-          <button onClick={() => setScreen(guestMode ? 'guest-settings' : 'settings')}>Ajustes</button>
+          {!guestMode && <button className={screen === 'dashboard' ? 'active' : ''} onClick={() => setScreen('dashboard')}>Inicio</button>}
+          {!guestMode && <button className={screen === 'courses' ? 'active' : ''} onClick={() => setScreen('courses')}>Cursos</button>}
+          <button className={screen === 'calculator' || screen === 'guest-calculator' ? 'active' : ''} onClick={() => setScreen(guestMode ? 'guest-calculator' : 'calculator')}>Calcular</button>
+          {!guestMode && <button className={screen === 'history' ? 'active' : ''} onClick={() => setScreen('history')}>Historial</button>}
+          {!guestMode && <button className={screen === 'communication' ? 'active' : ''} onClick={() => setScreen('communication')}>{isAdmin ? 'Comunicación' : 'Avisos'}</button>}
+          <button className={screen === 'settings' || screen === 'guest-settings' ? 'active' : ''} onClick={() => setScreen(guestMode ? 'guest-settings' : 'settings')}>Ajustes</button>
           {isAdmin && <button className="admin-link" onClick={() => setScreen('admin-dashboard')}>Admin</button>}
-          <button onClick={() => setScreen('about')}>Acerca</button>
+          <button className={screen === 'about' ? 'active' : ''} onClick={() => setScreen('about')}>Acerca</button>
           <button onClick={onSignOut}>{guestMode ? 'Salir' : 'Cerrar sesión'}</button>
         </nav>
       </header>
@@ -2104,7 +2178,8 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
 }
 
 function Dashboard({ profile, courses, history, announcements = [], setScreen, onSelectCourse }) {
-  const featuredAnnouncement = announcements.find((item) => item.display_mode === 'banner' && !item.read?.dismissed_at) || announcements.find((item) => !item.read?.dismissed_at)
+  const visiblePageAnnouncements = announcements.filter((item) => item.display_mode !== 'modal' && !item.read?.dismissed_at)
+  const featuredAnnouncement = visiblePageAnnouncements.find((item) => item.display_mode === 'banner') || visiblePageAnnouncements[0]
   return (
     <div className="page fade-in">
       <div className="hero-panel">
@@ -2165,9 +2240,10 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
           </div>
         )}
       </Card>
-      <div className="grid two">
+      <div className="grid three">
         <ActionCard title="Mis cursos" text="Agrega cursos regulares, arrastrados, adelantados, electivos u otros." button="Ver cursos" onClick={() => setScreen('courses')} />
         <ActionCard title="Historial" text="Revisa los cálculos que decidiste guardar." button="Ver historial" onClick={() => setScreen('history')} />
+        <ActionCard title="Avisos y sugerencias" text="Revisa novedades, envía reportes y consulta respuestas del administrador." button="Ver avisos" onClick={() => setScreen('communication')} />
       </div>
       <Footer />
     </div>
@@ -2628,6 +2704,31 @@ function About() {
 }
 
 
+function FloatingAnnouncementModal({ announcement, onClose }) {
+  const isImage = announcement?.modal_content_type === 'image' && announcement?.modal_image_url
+  return (
+    <div className="floating-announcement-backdrop" role="dialog" aria-modal="true">
+      <div className={`floating-announcement ${isImage ? 'image-mode' : 'text-mode'}`}>
+        <div className="floating-announcement-header">
+          <span>{formatAnnouncementType(announcement.type)}</span>
+          <button type="button" aria-label="Cerrar anuncio" onClick={onClose}>×</button>
+        </div>
+        {isImage ? (
+          <img className="floating-announcement-image" src={announcement.modal_image_url} alt={announcement.title} />
+        ) : (
+          <div className="floating-announcement-body">
+            <span className={`badge ${announcement.priority || 'normal'}`}>{announcement.priority === 'high' ? 'Importante' : 'Aviso'}</span>
+            <h2>{announcement.title}</h2>
+            <p>{announcement.summary}</p>
+            {announcement.content && <div className="floating-announcement-content">{announcement.content}</div>}
+            <button className="btn primary" onClick={onClose}>Entendido</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function CommunicationCenter({ announcements = [], suggestions = [], onDismissAnnouncement, onSubmitSuggestion }) {
   const [form, setForm] = useState({ type: 'suggestion', subject: '', message: '' })
   const visibleAnnouncements = announcements.filter((item) => !item.read?.dismissed_at)
@@ -2654,7 +2755,8 @@ function CommunicationCenter({ announcements = [], suggestions = [], onDismissAn
                     <h3>{item.title}</h3>
                     <p>{item.summary}</p>
                     {item.content && <p className="hint">{item.content}</p>}
-                    <p className="hint">Mostrar como: {formatDisplayMode(item.display_mode)} · Prioridad: {item.priority || 'normal'}</p>
+                    {item.display_mode === 'modal' && item.modal_content_type === 'image' && item.modal_image_url && <img className="announcement-thumb" src={item.modal_image_url} alt={item.title} />}
+                    <p className="hint">Mostrar como: {formatDisplayMode(item.display_mode)} · Prioridad: {item.priority || 'normal'} · Frecuencia: {formatRepeatMode(item.repeat_mode)}</p>
                   </div>
                   <button className="btn ghost small" onClick={() => onDismissAnnouncement(item.id)}>Cerrar</button>
                 </div>
@@ -2714,7 +2816,7 @@ function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpd
   const [tab, setTab] = useState('suggestions')
   const [filters, setFilters] = useState({ status: 'pending', q: '' })
   const [announcement, setAnnouncement] = useState({
-    title: '', summary: '', content: '', type: 'update', displayMode: 'card', priority: 'normal', status: 'active',
+    title: '', summary: '', content: '', type: 'update', displayMode: 'card', modalContentType: 'text', modalImageUrl: '', repeatMode: 'once', priority: 'normal', status: 'active',
     startsAt: '', endsAt: '', targetRole: 'student', universityId: '', facultyId: '', careerId: '', cycleId: ''
   })
   const announcements = data?.announcements || []
@@ -2736,9 +2838,20 @@ function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpd
     e.preventDefault()
     const ok = await onCreateAnnouncement(announcement)
     if (ok) setAnnouncement({
-      title: '', summary: '', content: '', type: 'update', displayMode: 'card', priority: 'normal', status: 'active',
+      title: '', summary: '', content: '', type: 'update', displayMode: 'card', modalContentType: 'text', modalImageUrl: '', repeatMode: 'once', priority: 'normal', status: 'active',
       startsAt: '', endsAt: '', targetRole: 'student', universityId: '', facultyId: '', careerId: '', cycleId: ''
     })
+  }
+
+  async function handleAnnouncementImage(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const dataUrl = await fileToAnnouncementImage(file)
+      setAnnouncement((current) => ({ ...current, modalImageUrl: dataUrl }))
+    } catch (error) {
+      alert(error.message || 'No se pudo cargar la imagen.')
+    }
   }
 
   return (
@@ -2769,14 +2882,37 @@ function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpd
                   <option value="reminder">Recordatorio</option>
                   <option value="info">Informativo</option>
                 </select>
-                <select className="input" value={announcement.displayMode} onChange={(e) => setAnnouncement({ ...announcement, displayMode: e.target.value })}>
+                <select className="input" value={announcement.displayMode} onChange={(e) => setAnnouncement({ ...announcement, displayMode: e.target.value, modalContentType: e.target.value === 'modal' ? announcement.modalContentType : 'text' })}>
                   <option value="card">Tarjeta en inicio</option>
                   <option value="banner">Banner superior</option>
-                  <option value="modal">Modal al iniciar sesión</option>
+                  <option value="modal">Ventana flotante</option>
                 </select>
               </div>
               <input className="input" placeholder="Resumen corto" value={announcement.summary} onChange={(e) => setAnnouncement({ ...announcement, summary: e.target.value })} />
               <textarea className="input textarea" rows="4" placeholder="Contenido o detalle" value={announcement.content} onChange={(e) => setAnnouncement({ ...announcement, content: e.target.value })} />
+              {announcement.displayMode === 'modal' && (
+                <div className="modal-config-box">
+                  <div className="grid three">
+                    <select className="input" value={announcement.modalContentType} onChange={(e) => setAnnouncement({ ...announcement, modalContentType: e.target.value })}>
+                      <option value="text">Ventana con texto</option>
+                      <option value="image">Ventana con imagen</option>
+                    </select>
+                    <select className="input" value={announcement.repeatMode} onChange={(e) => setAnnouncement({ ...announcement, repeatMode: e.target.value })}>
+                      <option value="once">Mostrar una vez por usuario</option>
+                      <option value="daily">Mostrar una vez al día</option>
+                      <option value="always">Mostrar cada vez que ingresa</option>
+                    </select>
+                    {announcement.modalContentType === 'image' && <input className="input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleAnnouncementImage} />}
+                  </div>
+                  {announcement.modalContentType === 'image' && announcement.modalImageUrl && (
+                    <div className="modal-image-preview">
+                      <img src={announcement.modalImageUrl} alt="Vista previa del anuncio" />
+                      <button type="button" className="btn ghost small" onClick={() => setAnnouncement({ ...announcement, modalImageUrl: '' })}>Quitar imagen</button>
+                    </div>
+                  )}
+                  <p className="hint">La imagen solo se usará en la ventana flotante. Las tarjetas y banners seguirán mostrando texto.</p>
+                </div>
+              )}
               <div className="grid three">
                 <select className="input" value={announcement.priority} onChange={(e) => setAnnouncement({ ...announcement, priority: e.target.value })}>
                   <option value="low">Prioridad baja</option>
@@ -2815,7 +2951,8 @@ function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpd
                   <div>
                     <h3>{item.title}</h3>
                     <p>{item.summary}</p>
-                    <p className="hint">{formatAnnouncementType(item.type)} · {formatDisplayMode(item.display_mode)} · {item.university?.code || 'Todas'} · {item.career?.name || 'Todas las carreras'} · Creado: {dateOnly(item.created_at)}</p>
+                    {item.display_mode === 'modal' && item.modal_content_type === 'image' && item.modal_image_url && <img className="announcement-thumb" src={item.modal_image_url} alt={item.title} />}
+                    <p className="hint">{formatAnnouncementType(item.type)} · {formatDisplayMode(item.display_mode)} · {formatRepeatMode(item.repeat_mode)} · {item.university?.code || 'Todas'} · {item.career?.name || 'Todas las carreras'} · Creado: {dateOnly(item.created_at)}</p>
                   </div>
                   <span className={`badge ${item.status}`}>{formatStatus(item.status)}</span>
                 </div>

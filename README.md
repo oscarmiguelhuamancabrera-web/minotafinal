@@ -49,3 +49,18 @@ git add .
 git commit -m "Version 1.1.8 anuncios sugerencias"
 git push origin main
 ```
+
+## Corrección v1.1.8-fix-modal
+
+- Se agregó el botón **Avisos** en la barra superior de escritorio.
+- Se agregó acceso rápido **Avisos y sugerencias** en el panel principal del estudiante.
+- Se implementó anuncio tipo **Ventana flotante**.
+- La ventana flotante puede mostrar texto o imagen.
+- La imagen se carga desde el panel admin y solo se usa para la ventana flotante.
+- Se registra el cierre del anuncio por usuario para evitar repetirlo según la frecuencia configurada.
+
+Antes de publicar, vuelve a ejecutar:
+
+```sql
+supabase/migration_v1_1_8_anuncios_sugerencias.sql
+```

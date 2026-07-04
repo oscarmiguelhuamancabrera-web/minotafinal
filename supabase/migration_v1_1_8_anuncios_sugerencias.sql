@@ -11,6 +11,9 @@ create table if not exists public.announcements (
   content text,
   type text not null default 'info' check (type in ('update','important','maintenance','reminder','info')),
   display_mode text not null default 'card' check (display_mode in ('banner','modal','card')),
+  modal_content_type text not null default 'text' check (modal_content_type in ('text','image')),
+  modal_image_url text,
+  repeat_mode text not null default 'once' check (repeat_mode in ('once','daily','always')),
   priority text not null default 'normal' check (priority in ('low','normal','high')),
   status text not null default 'active' check (status in ('draft','active','inactive')),
   target_role text not null default 'student' check (target_role in ('all','student','admin','superadmin')),
@@ -24,6 +27,32 @@ create table if not exists public.announcements (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Campos agregados para ventana flotante con imagen/texto.
+alter table public.announcements
+  add column if not exists modal_content_type text not null default 'text',
+  add column if not exists modal_image_url text,
+  add column if not exists repeat_mode text not null default 'once';
+
+-- En bases existentes, las restricciones se agregan de forma segura si no existen.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'announcements_modal_content_type_check'
+  ) then
+    alter table public.announcements
+      add constraint announcements_modal_content_type_check
+      check (modal_content_type in ('text','image'));
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint where conname = 'announcements_repeat_mode_check'
+  ) then
+    alter table public.announcements
+      add constraint announcements_repeat_mode_check
+      check (repeat_mode in ('once','daily','always'));
+  end if;
+end $$;
 
 create index if not exists announcements_status_idx on public.announcements(status);
 create index if not exists announcements_dates_idx on public.announcements(starts_at, ends_at);
