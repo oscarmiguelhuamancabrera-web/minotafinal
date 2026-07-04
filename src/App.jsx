@@ -487,6 +487,13 @@ function App() {
   const activeCourse = courses.find((course) => course.id === selectedCourseId) || null
   const greetingName = firstWord(profile?.first_name || profile?.full_name)
 
+  useEffect(() => {
+    if (!session?.user?.id || !profile?.id || screen !== 'communication') return
+    if (isAdmin) loadAdminData()
+    else loadUserCommunication(profile)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, profile?.id, isAdmin])
+
   function findBestTemplateForContext(context = {}, course = null, templates = evaluationTemplates) {
     const candidates = (templates || []).filter((template) => {
       if (template.status && template.status !== 'active') return false
@@ -850,7 +857,9 @@ function App() {
     const [announcementsRes, readsRes, suggestionsRes] = await Promise.all([
       supabase.from('announcements').select('*').eq('status', 'active').order('priority', { ascending: false }).order('created_at', { ascending: false }).limit(50),
       supabase.from('announcement_reads').select('*').eq('user_id', userProfile.id),
-      supabase.from('user_suggestions').select('*, responder:profiles(first_name,last_name,email)').eq('user_id', userProfile.id).order('created_at', { ascending: false }).limit(50)
+      // Consulta simple sin joins embebidos: evita fallas por relaciones ambiguas con profiles
+      // y asegura que el alumno vea admin_response, responded_at y el nuevo estado.
+      supabase.from('user_suggestions').select('*').eq('user_id', userProfile.id).order('updated_at', { ascending: false }).order('created_at', { ascending: false }).limit(50)
     ])
 
     if (announcementsRes.error) {
@@ -864,7 +873,12 @@ function App() {
       setAnnouncements(visible)
     }
 
-    if (!suggestionsRes.error) setSuggestions(suggestionsRes.data || [])
+    if (suggestionsRes.error) {
+      console.error('No se pudieron cargar las sugerencias del usuario:', suggestionsRes.error)
+      setSuggestions([])
+    } else {
+      setSuggestions(suggestionsRes.data || [])
+    }
   }
 
   async function dismissAnnouncement(announcementId) {
@@ -2830,7 +2844,7 @@ function CommunicationCenter({ announcements = [], suggestions = [], onDismissAn
                 <div className="response-box">
                   <b>Respuesta del administrador</b>
                   <p>{item.admin_response}</p>
-                  <span>{formatLastSeen(item.responded_at)} · {fullName(item.responder)}</span>
+                  <span>{formatLastSeen(item.responded_at)} · Administrador</span>
                 </div>
               ) : <p className="hint">Aún no hay respuesta del administrador.</p>}
             </Card>

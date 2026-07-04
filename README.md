@@ -85,3 +85,9 @@ Correcciones:
 - El panel de Comunicación carga sugerencias sin joins embebidos ambiguos.
 - El filtro de sugerencias ahora inicia en “Todos los estados”.
 - Se refuerzan políticas RLS para admin/superadmin.
+
+## Fix incluido
+- Corrige la carga de respuestas de sugerencias para alumnos.
+- La vista del alumno vuelve a consultar sus reportes al abrir Avisos/Comunicación.
+- La consulta de sugerencias del alumno ya no usa joins embebidos con profiles para evitar errores por relaciones ambiguas.
+- Último script Supabase a ejecutar: `supabase/migration_v1_1_8_fix_respuestas_usuario_final.sql`.
