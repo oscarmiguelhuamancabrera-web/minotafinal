@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.2.1'
+const APP_VERSION = '1.2.2'
 
 const emptyAuth = {
   firstName: '',
@@ -332,6 +332,48 @@ function formatEnrollmentType(type) {
     otro: 'Otro'
   }
   return labels[type] || 'Regular'
+}
+
+
+function loadTesseractScript() {
+  if (typeof window === 'undefined') return Promise.reject(new Error('OCR no disponible fuera del navegador.'))
+  if (window.Tesseract) return Promise.resolve(window.Tesseract)
+  if (window.__miNotaFinalTesseractPromise) return window.__miNotaFinalTesseractPromise
+
+  window.__miNotaFinalTesseractPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-mnf-tesseract="true"]')
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.Tesseract))
+      existing.addEventListener('error', () => reject(new Error('No se pudo cargar el lector OCR.')))
+      return
+    }
+
+    const script = document.createElement('script')
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+    script.async = true
+    script.defer = true
+    script.dataset.mnfTesseract = 'true'
+    script.onload = () => {
+      if (window.Tesseract) resolve(window.Tesseract)
+      else reject(new Error('El lector OCR no se cargó correctamente.'))
+    }
+    script.onerror = () => reject(new Error('No se pudo cargar el lector OCR. Revisa tu conexión.'))
+    document.head.appendChild(script)
+  })
+
+  return window.__miNotaFinalTesseractPromise
+}
+
+async function readImageText(file, onProgress) {
+  const Tesseract = await loadTesseractScript()
+  const result = await Tesseract.recognize(file, 'spa+eng', {
+    logger: (message) => {
+      if (message?.status === 'recognizing text' && typeof message.progress === 'number') {
+        onProgress?.(Math.round(message.progress * 100))
+      }
+    }
+  })
+  return cleanText(result?.data?.text || '')
 }
 
 function creatorName(course) {
@@ -2130,19 +2172,47 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
   const [imagePreview, setImagePreview] = useState('')
   const [imageName, setImageName] = useState('')
   const [ocrText, setOcrText] = useState('')
+  const [ocrStatus, setOcrStatus] = useState('idle')
+  const [ocrProgress, setOcrProgress] = useState(0)
+  const [ocrError, setOcrError] = useState('')
+  const [showManualOcr, setShowManualOcr] = useState(false)
   const [detectedGrades, setDetectedGrades] = useState([])
 
-  function handleImageChange(event) {
+  async function handleImageChange(event) {
     const file = event.target.files?.[0]
     if (!file) return
     setImageName(file.name)
     setImagePreview(URL.createObjectURL(file))
     setDetectedGrades([])
+    setOcrText('')
+    setOcrError('')
+    setOcrProgress(0)
+    setOcrStatus('reading')
+    setShowManualOcr(false)
+
+    try {
+      const text = await readImageText(file, setOcrProgress)
+      setOcrText(text)
+      const parsed = parseGradeText(text, items)
+      setDetectedGrades(parsed.detected)
+      if (parsed.detected.length > 0) {
+        setOcrStatus('done')
+      } else {
+        setOcrStatus('empty')
+        setOcrError('Se leyó la imagen, pero no se encontraron notas compatibles. Usa el modo manual o prueba una captura más clara.')
+      }
+    } catch (error) {
+      setOcrStatus('error')
+      setOcrError(error?.message || 'No se pudo leer la imagen automáticamente. Puedes usar el modo manual.')
+      setShowManualOcr(true)
+    }
   }
 
   function analyzeGradeText() {
     const parsed = parseGradeText(ocrText, items)
     setDetectedGrades(parsed.detected)
+    setOcrStatus(parsed.detected.length > 0 ? 'done' : 'empty')
+    if (parsed.detected.length === 0) setOcrError('No se detectaron notas en el texto leído.')
   }
 
   function applyDetectedGrades() {
@@ -2183,22 +2253,37 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
               ? 'Selecciona una calculadora para cargar una captura de notas.'
               : 'Selecciona un curso para cargar una captura de notas.'}
         </p>
-        <div className="grid two">
+        <div className="image-reader-layout">
           <label className={`file-drop ${canUseImageReader ? '' : 'disabled'}`}>
-            <input type="file" accept="image/*" disabled={!canUseImageReader} onChange={handleImageChange} />
+            <input type="file" accept="image/*" disabled={!canUseImageReader || ocrStatus === 'reading'} onChange={handleImageChange} />
             <span>{imageName || 'Seleccionar captura de notas'}</span>
+            <small>{canUseImageReader ? 'La app intentará leer la imagen automáticamente.' : 'Primero selecciona curso o plantilla.'}</small>
           </label>
+          {imagePreview && <img className="image-preview" src={imagePreview} alt="Vista previa de notas" />}
+        </div>
+        {ocrStatus === 'reading' && (
+          <div className="ocr-status">
+            <b>Leyendo imagen...</b>
+            <div className="progress-bar"><span style={{ width: `${Math.max(8, ocrProgress)}%` }} /></div>
+            <small>{ocrProgress > 0 ? `${ocrProgress}%` : 'Preparando OCR'}</small>
+          </div>
+        )}
+        {ocrStatus === 'done' && <p className="hint success-hint">Imagen leída. Revisa las notas detectadas antes de aplicarlas.</p>}
+        {ocrError && <p className="hint warning-hint">{ocrError}</p>}
+        <button type="button" className="link-button" disabled={!canUseImageReader} onClick={() => setShowManualOcr((value) => !value)}>
+          {showManualOcr ? 'Ocultar modo manual' : 'Usar modo manual avanzado'}
+        </button>
+        {showManualOcr && (
           <textarea
             className="input text-area"
-            disabled={!canUseImageReader}
-            placeholder="Pega aquí el texto leído de la captura, por ejemplo: PC1 Práctica Calificada 1 17.67..."
+            disabled={!canUseImageReader || ocrStatus === 'reading'}
+            placeholder="Pega aquí el texto si el lector automático no reconoce la captura. Ejemplo: PC1 Práctica Calificada 1 17.67..."
             value={ocrText}
             onChange={(e) => setOcrText(e.target.value)}
           />
-        </div>
-        {imagePreview && <img className="image-preview" src={imagePreview} alt="Vista previa de notas" />}
+        )}
         <div className="action-row left">
-          <button className="btn secondary small" disabled={!canUseImageReader || !ocrText.trim()} onClick={analyzeGradeText}>Detectar notas</button>
+          <button className="btn secondary small" disabled={!canUseImageReader || ocrStatus === 'reading' || !ocrText.trim()} onClick={analyzeGradeText}>Detectar notas</button>
           <button className="btn primary small" disabled={!canUseImageReader || detectedGrades.filter((row) => row.score !== null).length === 0} onClick={applyDetectedGrades}>Aplicar a la calculadora</button>
         </div>
         {detectedGrades.length > 0 && (

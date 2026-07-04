@@ -1,6 +1,6 @@
-# Mi Nota Final Web v1.2.1
+# Mi Nota Final Web v1.2.2
 
-Versión de corrección sobre la línea 1.2 con mejoras de cursos, admin y carga de imagen visible.
+Versión de corrección sobre la línea 1.2 con lectura automática de imagen y modo manual avanzado oculto.
 
 ## Cambios principales
 
@@ -30,7 +30,7 @@ supabase/migration_v1_1_6_mejoras_uso_cursos.sql
 ```bash
 git status
 git add .
-git commit -m "Version 1.2.1 fix boton leer notas desde imagen"
+git commit -m "Version 1.2.2 lectura automatica de notas desde imagen"
 git push origin main
 ```
 
@@ -41,7 +41,7 @@ git push origin HEAD:main
 ```
 
 
-## Cambios v1.2.1
+## Cambios v1.2.2
 
 - Botón **Agregar todos los cursos del ciclo** en Mis cursos.
 - Admin/Usuarios muestra cursos registrados, cálculos, última conexión, última actividad real e inactividad.
@@ -51,3 +51,7 @@ git push origin HEAD:main
 - Calculadora: sección **Leer notas desde imagen** con vista previa y parser de texto reconocido para aplicar notas detectadas.
 - Corrección: el bloque **Leer notas desde imagen** ahora se muestra siempre en Calcular; si no hay curso/plantilla, aparece deshabilitado con mensaje de ayuda.
 - Se incluyen scripts de sincronización y validación de mallas UPSJB + UAI en `supabase/`.
+
+- Calculadora: el flujo principal de **Leer notas desde imagen** ahora intenta OCR automático al seleccionar la captura.
+- Se oculta la caja de texto manual y queda como **modo manual avanzado** solo para casos donde el OCR falle.
+- El botón **Detectar notas** se habilita cuando hay texto leído automáticamente o texto pegado manualmente.
