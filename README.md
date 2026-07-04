@@ -1,24 +1,29 @@
-# Mi Nota Final Web/PWA v1.1.7
+# Mi Nota Final Web/PWA v1.1.8
 
 Aplicación React + Vite + Supabase + Vercel para cálculo académico de notas.
 
-## Cambios principales v1.1.7
+## Cambios principales v1.1.8
 
-- Botón **Agregar todos los cursos del ciclo** en “Mis cursos”.
-- La calculadora solo permite seleccionar cursos existentes; no crea cursos.
-- Solicitud de cursos no listados con trazabilidad del usuario.
-- Admin: usuarios con cantidad de cursos registrados, cálculos guardados, última conexión, última actividad real e inactividad.
-- Admin: filtros para usuarios sin cursos, sin cálculos, sin uso real o inactivos.
-- Admin Cursos: carreras cargadas desde `public.careers`, no desde cursos activos.
-- Corrección para evitar que la app vuelva sola a Inicio al refrescar sesión/perfil.
-- Corrección adicional de nombres duplicados desde Google.
-- Se incluyen scripts de sincronización y validación de mallas UPSJB + UAI.
+- Nuevo **Centro de comunicación**.
+- Admin/superadmin puede publicar **Anuncios / Novedades** administrables.
+- Los anuncios pueden tener tipo, prioridad, estado, fecha de inicio/fin y destinatarios por universidad, facultad, carrera, ciclo o rol.
+- El estudiante puede ver anuncios activos desde Inicio y desde **Avisos y sugerencias**.
+- El estudiante puede enviar **Sugerencias / Reportar problema**.
+- El admin/superadmin puede responder sugerencias y cambiar estado: pendiente, en revisión, resuelto o rechazado.
+- El estudiante puede ver la respuesta del administrador dentro de la app.
+- Se excluye admin/superadmin de métricas estudiantiles del dashboard admin.
 
 ## Supabase
 
 Ejecutar antes de publicar:
 
 ```sql
+supabase/migration_v1_1_8_anuncios_sugerencias.sql
+```
+
+Si vienes desde una versión anterior, mantener ejecutadas las migraciones previas, especialmente:
+
+```text
 supabase/migration_v1_1_7_admin_cursos_analytics.sql
 ```
 
@@ -41,6 +46,6 @@ npm run dev
 ```bash
 git status
 git add .
-git commit -m "Version 1.1.7 admin cursos analytics"
+git commit -m "Version 1.1.8 anuncios sugerencias"
 git push origin main
 ```

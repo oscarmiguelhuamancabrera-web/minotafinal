@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.7'
+const APP_VERSION = '1.1.8'
 
 const emptyAuth = {
   firstName: '',
@@ -254,6 +254,57 @@ function formatStatus(status) {
   return status || '—'
 }
 
+function formatSuggestionStatus(status) {
+  const labels = {
+    pending: 'Pendiente',
+    reviewing: 'En revisión',
+    resolved: 'Resuelto',
+    rejected: 'Rechazado'
+  }
+  return labels[status] || status || 'Pendiente'
+}
+
+function formatAnnouncementType(type) {
+  const labels = {
+    update: 'Nueva actualización',
+    important: 'Aviso importante',
+    maintenance: 'Mantenimiento',
+    reminder: 'Recordatorio',
+    info: 'Informativo'
+  }
+  return labels[type] || type || 'Informativo'
+}
+
+function formatDisplayMode(mode) {
+  const labels = {
+    banner: 'Banner',
+    modal: 'Modal',
+    card: 'Tarjeta'
+  }
+  return labels[mode] || mode || 'Tarjeta'
+}
+
+function announcementPriorityWeight(priority) {
+  if (priority === 'high') return 3
+  if (priority === 'normal') return 2
+  return 1
+}
+
+function matchesAnnouncementTarget(announcement, userProfile) {
+  if (!announcement || !userProfile) return false
+  const now = new Date()
+  const startsAt = announcement.starts_at ? new Date(announcement.starts_at) : null
+  const endsAt = announcement.ends_at ? new Date(announcement.ends_at) : null
+  if (startsAt && startsAt > now) return false
+  if (endsAt && endsAt < now) return false
+  if (announcement.target_role && announcement.target_role !== 'all' && announcement.target_role !== userProfile.role) return false
+  if (announcement.university_id && announcement.university_id !== userProfile.university_id) return false
+  if (announcement.faculty_id && announcement.faculty_id !== userProfile.faculty_id) return false
+  if (announcement.career_id && announcement.career_id !== userProfile.career_id) return false
+  if (announcement.cycle_id && announcement.cycle_id !== userProfile.current_cycle_id) return false
+  return true
+}
+
 function formatRole(role) {
   if (role === 'superadmin') return 'Superadmin'
   if (role === 'admin') return 'Administrador'
@@ -366,6 +417,8 @@ function App() {
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
   const [adminData, setAdminData] = useState(null)
+  const [announcements, setAnnouncements] = useState([])
+  const [suggestions, setSuggestions] = useState([])
   const [screen, setScreen] = useState('login')
   const [guestMode, setGuestMode] = useState(false)
   const [notice, setNotice] = useState(null)
@@ -675,6 +728,7 @@ function App() {
     }
 
     await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id)])
+    await loadUserCommunication(normalizedNameProfile)
 
     if (!isAdminRole(normalizedProfile.role)) {
       const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
@@ -724,6 +778,74 @@ function App() {
       course_id: metadata.course_id || null,
       metadata
     })
+  }
+
+
+  async function loadUserCommunication(userProfile = profile) {
+    if (!userProfile?.id || isAdminRole(userProfile.role)) {
+      setAnnouncements([])
+      setSuggestions([])
+      return
+    }
+
+    const [announcementsRes, readsRes, suggestionsRes] = await Promise.all([
+      supabase.from('announcements').select('*').eq('status', 'active').order('priority', { ascending: false }).order('created_at', { ascending: false }).limit(50),
+      supabase.from('announcement_reads').select('*').eq('user_id', userProfile.id),
+      supabase.from('user_suggestions').select('*, responder:profiles(first_name,last_name,email)').eq('user_id', userProfile.id).order('created_at', { ascending: false }).limit(50)
+    ])
+
+    if (announcementsRes.error) {
+      setAnnouncements([])
+    } else {
+      const readMap = new Map((readsRes.data || []).map((row) => [row.announcement_id, row]))
+      const visible = (announcementsRes.data || [])
+        .filter((item) => matchesAnnouncementTarget(item, userProfile))
+        .map((item) => ({ ...item, read: readMap.get(item.id) || null }))
+        .sort((a, b) => announcementPriorityWeight(b.priority) - announcementPriorityWeight(a.priority) || new Date(b.created_at) - new Date(a.created_at))
+      setAnnouncements(visible)
+    }
+
+    if (!suggestionsRes.error) setSuggestions(suggestionsRes.data || [])
+  }
+
+  async function dismissAnnouncement(announcementId) {
+    if (!session?.user?.id || !announcementId) return
+    const { error } = await supabase.from('announcement_reads').upsert({
+      announcement_id: announcementId,
+      user_id: session.user.id,
+      seen_at: new Date().toISOString(),
+      dismissed_at: new Date().toISOString()
+    }, { onConflict: 'announcement_id,user_id' })
+    if (error) notify('error', getErrorMessage(error))
+    else await loadUserCommunication(profile)
+  }
+
+  async function submitSuggestion(payload) {
+    if (!session?.user?.id || !profile?.id) return false
+    if (!payload.subject?.trim() || !payload.message?.trim()) {
+      notify('error', 'Completa el asunto y el mensaje.')
+      return false
+    }
+    const { error } = await supabase.from('user_suggestions').insert({
+      user_id: session.user.id,
+      type: payload.type || 'suggestion',
+      subject: payload.subject.trim(),
+      message: payload.message.trim(),
+      status: 'pending',
+      university_id: profile.university_id || null,
+      faculty_id: profile.faculty_id || null,
+      career_id: profile.career_id || null,
+      cycle_id: profile.current_cycle_id || null
+    })
+    if (error) {
+      notify('error', getErrorMessage(error))
+      return false
+    }
+    notify('success', 'Tu reporte fue enviado al administrador.')
+    await recordUsageEvent('suggestion_submitted', { type: payload.type })
+    await loadUserCommunication(profile)
+    if (adminData) await loadAdminData()
+    return true
   }
 
   async function loadSettings(userId = session?.user?.id) {
@@ -1456,7 +1578,7 @@ function App() {
   }
 
   async function loadAdminData() {
-    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, careersRes, cyclesRes, templatesRes, componentsRes, usageRes, requestsRes] = await Promise.all([
+    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, careersRes, cyclesRes, templatesRes, componentsRes, usageRes, requestsRes, announcementsRes, suggestionsRes] = await Promise.all([
       supabase.from('profiles').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
       supabase.from('courses').select(COURSE_SELECT_ADMIN).order('created_at', { ascending: false }),
       supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), evaluation_template:evaluation_templates(name)').order('created_at', { ascending: false }).limit(300),
@@ -1469,7 +1591,9 @@ function App() {
       supabase.from('evaluation_templates').select('*, university:universities(name,code), faculty:faculties(name), career:careers(name), course:courses(name)').order('created_at', { ascending: false }),
       supabase.from('evaluation_components').select('*').order('component_order'),
       supabase.from('app_usage_events').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), course:courses(name)').order('created_at', { ascending: false }).limit(1000),
-      supabase.from('course_requests').select('*, requester:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500)
+      supabase.from('course_requests').select('*, requester:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500),
+      supabase.from('announcements').select('*, creator:profiles(first_name,last_name,email), university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name), cycle:cycles(id,name,order_number)').order('created_at', { ascending: false }).limit(500),
+      supabase.from('user_suggestions').select('*, user:profiles(first_name,last_name,email, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), responder:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)').order('created_at', { ascending: false }).limit(800)
     ])
 
     setAdminData({
@@ -1485,7 +1609,9 @@ function App() {
       templates: templatesRes.data || [],
       components: componentsRes.data || [],
       usageEvents: usageRes.data || [],
-      courseRequests: requestsRes.data || []
+      courseRequests: requestsRes.data || [],
+      announcements: announcementsRes.data || [],
+      suggestions: suggestionsRes.data || []
     })
   }
 
@@ -1572,6 +1698,69 @@ function App() {
     }
   }
 
+
+  async function createAnnouncement(payload) {
+    if (!payload.title?.trim() || !payload.summary?.trim()) {
+      notify('error', 'Completa título y resumen del anuncio.')
+      return false
+    }
+    const { error } = await supabase.from('announcements').insert({
+      title: payload.title.trim(),
+      summary: payload.summary.trim(),
+      content: payload.content?.trim() || null,
+      type: payload.type || 'info',
+      display_mode: payload.displayMode || 'card',
+      priority: payload.priority || 'normal',
+      status: payload.status || 'active',
+      starts_at: payload.startsAt || null,
+      ends_at: payload.endsAt || null,
+      target_role: payload.targetRole || 'student',
+      university_id: payload.universityId || null,
+      faculty_id: payload.facultyId || null,
+      career_id: payload.careerId || null,
+      cycle_id: payload.cycleId || null,
+      created_by: profile?.id || null
+    })
+    if (error) {
+      notify('error', getErrorMessage(error))
+      return false
+    }
+    notify('success', 'Anuncio publicado correctamente.')
+    await loadAdminData()
+    return true
+  }
+
+  async function updateAnnouncement(announcementId, payload) {
+    const { error } = await supabase.from('announcements').update({
+      ...payload,
+      updated_at: new Date().toISOString()
+    }).eq('id', announcementId)
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Anuncio actualizado correctamente.')
+      await loadAdminData()
+    }
+  }
+
+  async function respondSuggestion(suggestionId, payload) {
+    if (!payload.adminResponse?.trim() && payload.status !== 'reviewing') {
+      notify('error', 'Escribe una respuesta para el usuario.')
+      return
+    }
+    const { error } = await supabase.from('user_suggestions').update({
+      status: payload.status || 'resolved',
+      admin_response: payload.adminResponse?.trim() || null,
+      responded_by: profile?.id || null,
+      responded_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).eq('id', suggestionId)
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Respuesta enviada correctamente.')
+      await loadAdminData()
+    }
+  }
+
   const navItems = useMemo(() => {
     if (guestMode) return [
       ['guest-calculator', '🧮', 'Calcular'],
@@ -1584,6 +1773,7 @@ function App() {
       ['courses', '📚', 'Cursos'],
       ['calculator', '🧮', 'Calcular'],
       ['history', '📊', 'Historial'],
+      ['communication', '💬', 'Avisos'],
       ['more', '☰', 'Más']
     ]
     return base
@@ -1661,7 +1851,7 @@ function App() {
                 allowTemplateSelection
               />
             )}
-            {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
+            {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} announcements={announcements} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onAddAll={handleAddAllStudentCourses} onHide={handleHideStudentCourse} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
               <CalculatorScreen
@@ -1688,6 +1878,8 @@ function App() {
               />
             )}
             {session && screen === 'history' && <HistoryScreen history={history} />}
+            {session && !isAdmin && screen === 'communication' && <CommunicationCenter announcements={announcements} suggestions={suggestions} onDismissAnnouncement={dismissAnnouncement} onSubmitSuggestion={submitSuggestion} />}
+            {session && isAdmin && screen === 'communication' && <AdminCommunication data={adminData} profile={profile} onLoad={loadAdminData} onCreateAnnouncement={createAnnouncement} onUpdateAnnouncement={updateAnnouncement} onRespondSuggestion={respondSuggestion} />}
             {session && screen === 'settings' && (
               <SettingsScreen
                 settings={settings}
@@ -1710,6 +1902,7 @@ function App() {
             {session && isAdmin && screen === 'admin-courses' && <AdminCourses data={adminData} onLoad={loadAdminData} onUpdate={updateCourseAdmin} />}
             {session && isAdmin && screen === 'admin-calculations' && <AdminCalculations data={adminData} onLoad={loadAdminData} />}
             {session && isAdmin && screen === 'admin-evaluations' && <AdminEvaluations data={adminData} onLoad={loadAdminData} onCreateTemplate={createEvaluationTemplate} onUpdateTemplate={updateEvaluationTemplate} onCreateComponent={createEvaluationComponent} onUpdateComponent={updateEvaluationComponent} />}
+            {session && isAdmin && screen === 'admin-communication' && <AdminCommunication data={adminData} profile={profile} onLoad={loadAdminData} onCreateAnnouncement={createAnnouncement} onUpdateAnnouncement={updateAnnouncement} onRespondSuggestion={respondSuggestion} />}
           </AuthenticatedLayout>
         )}
       </main>
@@ -1910,7 +2103,8 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
   )
 }
 
-function Dashboard({ profile, courses, history, setScreen, onSelectCourse }) {
+function Dashboard({ profile, courses, history, announcements = [], setScreen, onSelectCourse }) {
+  const featuredAnnouncement = announcements.find((item) => item.display_mode === 'banner' && !item.read?.dismissed_at) || announcements.find((item) => !item.read?.dismissed_at)
   return (
     <div className="page fade-in">
       <div className="hero-panel">
@@ -1929,6 +2123,18 @@ function Dashboard({ profile, courses, history, setScreen, onSelectCourse }) {
         <StatCard icon="📊" label="Resultados guardados" value={history.length} />
         <StatCard icon="🏛️" label="Universidad" value={profile?.university?.code || '—'} />
       </div>
+      {featuredAnnouncement && (
+        <Card className={`announcement-card ${featuredAnnouncement.priority || 'normal'}`}>
+          <div className="list-row">
+            <div>
+              <span className="badge info">{formatAnnouncementType(featuredAnnouncement.type)}</span>
+              <h3>{featuredAnnouncement.title}</h3>
+              <p>{featuredAnnouncement.summary}</p>
+            </div>
+            <button className="btn secondary small" onClick={() => setScreen('communication')}>Ver novedades</button>
+          </div>
+        </Card>
+      )}
       <Card>
         <div className="section-title">
           <span>📌</span>
@@ -2397,6 +2603,7 @@ function MoreScreen({ isAdmin, guestMode, setScreen, onSignOut }) {
       <div className="grid two">
         {!guestMode && <ActionCard title="Perfil" text="Datos personales, carrera y ciclo." button="Abrir" onClick={() => setScreen('profile')} />}
         <ActionCard title="Ajustes" text="Porcentajes y nota mínima." button="Abrir" onClick={() => setScreen(guestMode ? 'guest-settings' : 'settings')} />
+        {!guestMode && <ActionCard title={isAdmin ? 'Comunicación' : 'Avisos y sugerencias'} text={isAdmin ? 'Publica anuncios y responde reportes.' : 'Revisa novedades o envía una sugerencia.'} button="Abrir" onClick={() => setScreen('communication')} />}
         <ActionCard title="Acerca de" text="Versión y datos del sistema." button="Abrir" onClick={() => setScreen('about')} />
         {isAdmin && <ActionCard title="Panel administrador" text="Reportes, usuarios, cursos y cálculos." button="Abrir" onClick={() => setScreen('admin-dashboard')} />}
       </div>
@@ -2420,15 +2627,268 @@ function About() {
   )
 }
 
+
+function CommunicationCenter({ announcements = [], suggestions = [], onDismissAnnouncement, onSubmitSuggestion }) {
+  const [form, setForm] = useState({ type: 'suggestion', subject: '', message: '' })
+  const visibleAnnouncements = announcements.filter((item) => !item.read?.dismissed_at)
+
+  async function submit(e) {
+    e.preventDefault()
+    const ok = await onSubmitSuggestion(form)
+    if (ok) setForm({ type: 'suggestion', subject: '', message: '' })
+  }
+
+  return (
+    <div className="page fade-in">
+      <Header title="Avisos y sugerencias" subtitle="Revisa novedades del sistema y envía reportes al administrador." />
+      <div className="grid two">
+        <Card>
+          <h3>Novedades activas</h3>
+          {!visibleAnnouncements.length && <Empty text="No hay anuncios activos para tu perfil." compact />}
+          <div className="communication-list">
+            {visibleAnnouncements.map((item) => (
+              <div key={item.id} className={`announcement-card ${item.priority || 'normal'}`}>
+                <div className="list-row">
+                  <div>
+                    <span className="badge info">{formatAnnouncementType(item.type)}</span>
+                    <h3>{item.title}</h3>
+                    <p>{item.summary}</p>
+                    {item.content && <p className="hint">{item.content}</p>}
+                    <p className="hint">Mostrar como: {formatDisplayMode(item.display_mode)} · Prioridad: {item.priority || 'normal'}</p>
+                  </div>
+                  <button className="btn ghost small" onClick={() => onDismissAnnouncement(item.id)}>Cerrar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card>
+          <h3>Enviar sugerencia o reporte</h3>
+          <form className="stack" onSubmit={submit}>
+            <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <option value="suggestion">Sugerencia de mejora</option>
+              <option value="bug">Error en la app</option>
+              <option value="missing_course">Falta un curso</option>
+              <option value="wrong_course">Curso mal escrito</option>
+              <option value="formula">Fórmula o porcentaje no coincide</option>
+              <option value="profile">Problema con mi perfil</option>
+              <option value="other">Otro</option>
+            </select>
+            <input className="input" placeholder="Asunto" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+            <textarea className="input textarea" placeholder="Describe el problema o sugerencia" rows="6" value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
+            <button className="btn primary">Enviar al administrador</button>
+          </form>
+        </Card>
+      </div>
+      <Card>
+        <h3>Mis reportes enviados</h3>
+        {!suggestions.length && <Empty text="Todavía no enviaste sugerencias o reportes." compact />}
+        <div className="admin-list admin-scroll-list">
+          {suggestions.map((item) => (
+            <Card key={item.id} className="nested-card">
+              <div className="list-row">
+                <div>
+                  <h3>{item.subject}</h3>
+                  <p>{item.message}</p>
+                  <p className="hint">Enviado: {dateOnly(item.created_at)} · Tipo: {item.type}</p>
+                </div>
+                <span className={`badge ${item.status}`}>{formatSuggestionStatus(item.status)}</span>
+              </div>
+              {item.admin_response ? (
+                <div className="response-box">
+                  <b>Respuesta del administrador</b>
+                  <p>{item.admin_response}</p>
+                  <span>{formatLastSeen(item.responded_at)} · {fullName(item.responder)}</span>
+                </div>
+              ) : <p className="hint">Aún no hay respuesta del administrador.</p>}
+            </Card>
+          ))}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpdateAnnouncement, onRespondSuggestion }) {
+  useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const [tab, setTab] = useState('suggestions')
+  const [filters, setFilters] = useState({ status: 'pending', q: '' })
+  const [announcement, setAnnouncement] = useState({
+    title: '', summary: '', content: '', type: 'update', displayMode: 'card', priority: 'normal', status: 'active',
+    startsAt: '', endsAt: '', targetRole: 'student', universityId: '', facultyId: '', careerId: '', cycleId: ''
+  })
+  const announcements = data?.announcements || []
+  const suggestions = data?.suggestions || []
+  const universities = data?.universities || []
+  const faculties = (data?.faculties || []).filter((item) => !announcement.universityId || item.university_id === announcement.universityId)
+  const careers = (data?.careers || []).filter((item) => !announcement.facultyId || item.faculty_id === announcement.facultyId)
+  const cycles = data?.cycles || []
+  const pending = suggestions.filter((item) => item.status === 'pending').length
+  const reviewing = suggestions.filter((item) => item.status === 'reviewing').length
+  const resolved = suggestions.filter((item) => item.status === 'resolved').length
+  const activeAnnouncements = announcements.filter((item) => item.status === 'active').length
+  const filteredSuggestions = suggestions.filter((item) => {
+    const text = `${item.subject} ${item.message} ${fullName(item.user)} ${item.user?.email || ''} ${item.university?.code || ''} ${item.career?.name || ''}`.toLowerCase()
+    return (!filters.status || item.status === filters.status) && text.includes(filters.q.toLowerCase())
+  })
+
+  async function saveAnnouncement(e) {
+    e.preventDefault()
+    const ok = await onCreateAnnouncement(announcement)
+    if (ok) setAnnouncement({
+      title: '', summary: '', content: '', type: 'update', displayMode: 'card', priority: 'normal', status: 'active',
+      startsAt: '', endsAt: '', targetRole: 'student', universityId: '', facultyId: '', careerId: '', cycleId: ''
+    })
+  }
+
+  return (
+    <div className="page fade-in">
+      <Header title="Centro de comunicación" subtitle="Administra anuncios y responde sugerencias de los usuarios." />
+      <div className="cards stats-grid">
+        <StatCard icon="📣" label="Anuncios activos" value={activeAnnouncements} />
+        <StatCard icon="🕒" label="Pendientes" value={pending} />
+        <StatCard icon="👀" label="En revisión" value={reviewing} />
+        <StatCard icon="✅" label="Resueltos" value={resolved} />
+      </div>
+      <div className="action-row left">
+        <button className={`btn ${tab === 'suggestions' ? 'primary' : 'secondary'} small`} onClick={() => setTab('suggestions')}>Sugerencias</button>
+        <button className={`btn ${tab === 'announcements' ? 'primary' : 'secondary'} small`} onClick={() => setTab('announcements')}>Anuncios</button>
+      </div>
+
+      {tab === 'announcements' && (
+        <>
+          <Card>
+            <h3>Nuevo anuncio</h3>
+            <form className="stack" onSubmit={saveAnnouncement}>
+              <div className="grid three">
+                <input className="input" placeholder="Título" value={announcement.title} onChange={(e) => setAnnouncement({ ...announcement, title: e.target.value })} />
+                <select className="input" value={announcement.type} onChange={(e) => setAnnouncement({ ...announcement, type: e.target.value })}>
+                  <option value="update">Nueva actualización</option>
+                  <option value="important">Aviso importante</option>
+                  <option value="maintenance">Mantenimiento</option>
+                  <option value="reminder">Recordatorio</option>
+                  <option value="info">Informativo</option>
+                </select>
+                <select className="input" value={announcement.displayMode} onChange={(e) => setAnnouncement({ ...announcement, displayMode: e.target.value })}>
+                  <option value="card">Tarjeta en inicio</option>
+                  <option value="banner">Banner superior</option>
+                  <option value="modal">Modal al iniciar sesión</option>
+                </select>
+              </div>
+              <input className="input" placeholder="Resumen corto" value={announcement.summary} onChange={(e) => setAnnouncement({ ...announcement, summary: e.target.value })} />
+              <textarea className="input textarea" rows="4" placeholder="Contenido o detalle" value={announcement.content} onChange={(e) => setAnnouncement({ ...announcement, content: e.target.value })} />
+              <div className="grid three">
+                <select className="input" value={announcement.priority} onChange={(e) => setAnnouncement({ ...announcement, priority: e.target.value })}>
+                  <option value="low">Prioridad baja</option>
+                  <option value="normal">Prioridad normal</option>
+                  <option value="high">Prioridad alta</option>
+                </select>
+                <input className="input" type="datetime-local" value={announcement.startsAt} onChange={(e) => setAnnouncement({ ...announcement, startsAt: e.target.value })} />
+                <input className="input" type="datetime-local" value={announcement.endsAt} onChange={(e) => setAnnouncement({ ...announcement, endsAt: e.target.value })} />
+              </div>
+              <div className="grid three">
+                <select className="input" value={announcement.targetRole} onChange={(e) => setAnnouncement({ ...announcement, targetRole: e.target.value })}>
+                  <option value="student">Solo estudiantes</option>
+                  <option value="all">Todos</option>
+                  <option value="admin">Admins</option>
+                </select>
+                <select className="input" value={announcement.universityId} onChange={(e) => setAnnouncement({ ...announcement, universityId: e.target.value, facultyId: '', careerId: '' })}>
+                  <option value="">Todas las universidades</option>{universities.map((u) => <option key={u.id} value={u.id}>{u.code || u.name}</option>)}
+                </select>
+                <select className="input" value={announcement.facultyId} onChange={(e) => setAnnouncement({ ...announcement, facultyId: e.target.value, careerId: '' })}>
+                  <option value="">Todas las facultades</option>{faculties.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+                <select className="input" value={announcement.careerId} onChange={(e) => setAnnouncement({ ...announcement, careerId: e.target.value })}>
+                  <option value="">Todas las carreras</option>{careers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select className="input" value={announcement.cycleId} onChange={(e) => setAnnouncement({ ...announcement, cycleId: e.target.value })}>
+                  <option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <button className="btn primary">Publicar anuncio</button>
+            </form>
+          </Card>
+          <div className="admin-list admin-scroll-list">
+            {announcements.map((item) => (
+              <Card key={item.id}>
+                <div className="list-row">
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p>{item.summary}</p>
+                    <p className="hint">{formatAnnouncementType(item.type)} · {formatDisplayMode(item.display_mode)} · {item.university?.code || 'Todas'} · {item.career?.name || 'Todas las carreras'} · Creado: {dateOnly(item.created_at)}</p>
+                  </div>
+                  <span className={`badge ${item.status}`}>{formatStatus(item.status)}</span>
+                </div>
+                <div className="action-row left">
+                  <button className="btn ghost small" onClick={() => onUpdateAnnouncement(item.id, { status: item.status === 'active' ? 'inactive' : 'active' })}>{item.status === 'active' ? 'Inactivar' : 'Activar'}</button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+
+      {tab === 'suggestions' && (
+        <>
+          <div className="filters admin-course-filters">
+            <input className="input" placeholder="Buscar por usuario, correo, asunto o carrera" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+            <select className="input" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+              <option value="">Todos los estados</option>
+              <option value="pending">Pendiente</option>
+              <option value="reviewing">En revisión</option>
+              <option value="resolved">Resuelto</option>
+              <option value="rejected">Rechazado</option>
+            </select>
+          </div>
+          <div className="admin-list admin-scroll-list">
+            {!filteredSuggestions.length && <Empty text="No hay sugerencias con los filtros seleccionados." compact />}
+            {filteredSuggestions.map((item) => <SuggestionAdminCard key={item.id} item={item} onRespond={onRespondSuggestion} />)}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function SuggestionAdminCard({ item, onRespond }) {
+  const [response, setResponse] = useState(item.admin_response || '')
+  const [status, setStatus] = useState(item.status || 'resolved')
+  return (
+    <Card>
+      <div className="list-row">
+        <div>
+          <h3>{item.subject}</h3>
+          <p>{item.message}</p>
+          <p className="hint">{fullName(item.user)} · {item.user?.email || ''} · {item.university?.code || item.university?.name || 'Sin universidad'} · {item.career?.name || 'Sin carrera'} · {dateOnly(item.created_at)}</p>
+        </div>
+        <span className={`badge ${item.status}`}>{formatSuggestionStatus(item.status)}</span>
+      </div>
+      <div className="stack">
+        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="reviewing">En revisión</option>
+          <option value="resolved">Resuelto</option>
+          <option value="rejected">Rechazado</option>
+          <option value="pending">Pendiente</option>
+        </select>
+        <textarea className="input textarea" rows="4" placeholder="Respuesta para el usuario" value={response} onChange={(e) => setResponse(e.target.value)} />
+        <button className="btn primary small" onClick={() => onRespond(item.id, { status, adminResponse: response })}>Enviar respuesta</button>
+      </div>
+      {item.admin_response && <p className="hint">Última respuesta: {formatLastSeen(item.responded_at)} · {fullName(item.responder)}</p>}
+    </Card>
+  )
+}
+
 function AdminDashboard({ data, onLoad, setScreen }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState({ university: '', faculty: '', career: '', cycle: '', period: 'today' })
-  const users = data?.users || []
+  const allUsers = data?.users || []
+  const users = allUsers.filter((user) => !['admin', 'superadmin'].includes(user.role))
+  const studentUserIds = new Set(users.map((user) => user.id))
   const courses = data?.courses || []
-  const calculations = data?.calculations || []
-  const logins = data?.logins || []
+  const calculations = (data?.calculations || []).filter((item) => !item.user_id || studentUserIds.has(item.user_id))
+  const logins = (data?.logins || []).filter((item) => !item.user_id || studentUserIds.has(item.user_id))
   const studentCourses = data?.studentCourses || []
-  const usageEvents = (data?.usageEvents || []).filter((event) => isWithinPeriod(event.created_at, filters.period))
+  const usageEvents = (data?.usageEvents || []).filter((event) => (!event.user_id || studentUserIds.has(event.user_id)) && isWithinPeriod(event.created_at, filters.period))
   const periodLogins = logins.filter((login) => isWithinPeriod(login.login_at, filters.period))
   const todayLogins = logins.filter((login) => login.login_date === todayISO())
   const uniqueToday = new Set(todayLogins.map((login) => login.user_id)).size
@@ -2528,6 +2988,7 @@ function AdminDashboard({ data, onLoad, setScreen }) {
         <button className="btn secondary" onClick={() => setScreen('admin-courses')}>📚 Gestionar cursos</button>
         <button className="btn secondary" onClick={() => setScreen('admin-calculations')}>📊 Ver cálculos</button>
         <button className="btn secondary" onClick={() => setScreen('admin-evaluations')}>🧩 Métodos de evaluación</button>
+        <button className="btn secondary" onClick={() => setScreen('admin-communication')}>💬 Comunicación</button>
       </div>
     </div>
   )
