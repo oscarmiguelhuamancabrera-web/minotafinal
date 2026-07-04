@@ -1652,25 +1652,49 @@ function App() {
       supabase.from('app_usage_events').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), course:courses(name)').order('created_at', { ascending: false }).limit(1000),
       supabase.from('course_requests').select('*, requester:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500),
       supabase.from('announcements').select('*, creator:profiles(first_name,last_name,email), university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name), cycle:cycles(id,name,order_number)').order('created_at', { ascending: false }).limit(500),
-      supabase.from('user_suggestions').select('*, user:profiles(first_name,last_name,email, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), responder:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)').order('created_at', { ascending: false }).limit(800)
+      // Se carga sin joins embebidos para evitar errores PGRST201 cuando existen varias relaciones con profiles.
+      supabase.from('user_suggestions').select('*').order('created_at', { ascending: false }).limit(800)
     ])
 
+    const profileRows = profilesRes.data || []
+    const universityRows = universitiesRes.data || []
+    const facultyRows = facultiesRes.data || []
+    const careerRows = careersRes.data || []
+    const cycleRows = cyclesRes.data || []
+
+    const profileMap = new Map(profileRows.map((item) => [item.id, item]))
+    const universityMap = new Map(universityRows.map((item) => [item.id, item]))
+    const facultyMap = new Map(facultyRows.map((item) => [item.id, item]))
+    const careerMap = new Map(careerRows.map((item) => [item.id, item]))
+    const cycleMap = new Map(cycleRows.map((item) => [item.id, item]))
+
+    const suggestionRows = (suggestionsRes.error ? [] : suggestionsRes.data || []).map((item) => ({
+      ...item,
+      user: profileMap.get(item.user_id) || null,
+      responder: profileMap.get(item.responded_by) || null,
+      university: universityMap.get(item.university_id) || profileMap.get(item.user_id)?.university || null,
+      faculty: facultyMap.get(item.faculty_id) || profileMap.get(item.user_id)?.faculty || null,
+      career: careerMap.get(item.career_id) || profileMap.get(item.user_id)?.career || null,
+      cycle: cycleMap.get(item.cycle_id) || profileMap.get(item.user_id)?.cycle || null
+    }))
+
     setAdminData({
-      users: profilesRes.data || [],
+      users: profileRows,
       courses: coursesRes.data || [],
       calculations: calculationsRes.data || [],
       logins: loginsRes.data || [],
       studentCourses: studentCoursesRes.data || [],
-      universities: universitiesRes.data || [],
-      faculties: facultiesRes.data || [],
-      careers: careersRes.data || [],
-      cycles: cyclesRes.data || [],
+      universities: universityRows,
+      faculties: facultyRows,
+      careers: careerRows,
+      cycles: cycleRows,
       templates: templatesRes.data || [],
       components: componentsRes.data || [],
       usageEvents: usageRes.data || [],
       courseRequests: requestsRes.data || [],
       announcements: announcementsRes.data || [],
-      suggestions: suggestionsRes.data || []
+      suggestions: suggestionRows,
+      suggestionsError: suggestionsRes.error ? getErrorMessage(suggestionsRes.error) : ''
     })
   }
 
@@ -2820,7 +2844,7 @@ function CommunicationCenter({ announcements = [], suggestions = [], onDismissAn
 function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpdateAnnouncement, onRespondSuggestion }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [tab, setTab] = useState('suggestions')
-  const [filters, setFilters] = useState({ status: 'pending', q: '' })
+  const [filters, setFilters] = useState({ status: '', q: '' })
   const [announcement, setAnnouncement] = useState({
     title: '', summary: '', content: '', type: 'update', displayMode: 'card', modalContentType: 'text', modalImageUrl: '', repeatMode: 'once', priority: 'normal', status: 'active',
     startsAt: '', endsAt: '', targetRole: 'student', universityId: '', facultyId: '', careerId: '', cycleId: ''
@@ -2863,6 +2887,7 @@ function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpd
   return (
     <div className="page fade-in">
       <Header title="Centro de comunicación" subtitle="Administra anuncios y responde sugerencias de los usuarios." />
+      {data?.suggestionsError && <div className="alert error">No se pudieron cargar las sugerencias: {data.suggestionsError}</div>}
       <div className="cards stats-grid">
         <StatCard icon="📣" label="Anuncios activos" value={activeAnnouncements} />
         <StatCard icon="🕒" label="Pendientes" value={pending} />

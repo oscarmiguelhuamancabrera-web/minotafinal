@@ -71,3 +71,17 @@ supabase/migration_v1_1_8_anuncios_sugerencias.sql
 - Corrige la carga de sugerencias para admin/superadmin.
 - El panel de comunicación refresca la data administrativa al abrirse.
 - Las sugerencias enviadas por alumnos se muestran al superadmin desde Comunicación → Sugerencias.
+
+
+## Fix incluido: sugerencias visibles para superadmin
+
+Ejecutar en Supabase después de la migración principal:
+
+```sql
+supabase/migration_v1_1_8_fix_sugerencias_superadmin.sql
+```
+
+Correcciones:
+- El panel de Comunicación carga sugerencias sin joins embebidos ambiguos.
+- El filtro de sugerencias ahora inicia en “Todos los estados”.
+- Se refuerzan políticas RLS para admin/superadmin.
