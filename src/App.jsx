@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.6'
+const APP_VERSION = '1.1.7'
 
 const emptyAuth = {
   firstName: '',
@@ -44,6 +44,41 @@ function timeOnly(value) {
 function dateOnly(value) {
   if (!value) return '—'
   return new Date(value).toLocaleDateString('es-PE')
+}
+
+
+function daysSince(value) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const diff = Date.now() - date.getTime()
+  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
+}
+
+function formatLastSeen(value) {
+  if (!value) return 'Sin registro'
+  return `${dateOnly(value)} ${timeOnly(value)}`
+}
+
+function inactivityLabel(value) {
+  const days = daysSince(value)
+  if (days === null) return 'Sin actividad'
+  if (days === 0) return 'Hoy'
+  if (days === 1) return '1 día'
+  return `${days} días`
+}
+
+function safeMaxDate(...values) {
+  const valid = values
+    .filter(Boolean)
+    .map((value) => new Date(value))
+    .filter((date) => !Number.isNaN(date.getTime()))
+  if (!valid.length) return null
+  return new Date(Math.max(...valid.map((date) => date.getTime()))).toISOString()
+}
+
+function shouldAutoNavigateFrom(screen) {
+  return !screen || ['login', 'complete-profile', 'tutorial'].includes(screen)
 }
 
 function firstWord(value) {
@@ -179,6 +214,7 @@ function findSimilarCourses(name = '', courseList = []) {
 function eventLabel(type) {
   const labels = {
     course_added: 'Curso agregado',
+    course_bulk_added: 'Cursos agregados masivamente',
     course_hidden: 'Curso ocultado',
     course_requested: 'Curso solicitado',
     calculation_done: 'Cálculo realizado',
@@ -335,6 +371,11 @@ function App() {
   const [notice, setNotice] = useState(null)
   const [loading, setLoading] = useState(true)
   const recordedLoginRef = useRef('')
+  const screenRef = useRef(screen)
+
+  useEffect(() => {
+    screenRef.current = screen
+  }, [screen])
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin'
   const activeCourse = courses.find((course) => course.id === selectedCourseId) || null
@@ -570,7 +611,7 @@ function App() {
         setProfile(nextAdminProfile)
         await loadSettings(user.id)
         await loadAdminData()
-        setScreen('admin-dashboard')
+        if (shouldAutoNavigateFrom(screenRef.current)) setScreen('admin-dashboard')
         return
       }
 
@@ -604,34 +645,57 @@ function App() {
       }).eq('id', userProfile.id)
     }
 
-    setProfile(normalizedProfile)
+    const fixedName = normalizeProfileNameFields(normalizedProfile)
+    const normalizedNameProfile = {
+      ...normalizedProfile,
+      first_name: fixedName.firstName || normalizedProfile.first_name,
+      last_name: fixedName.lastName || normalizedProfile.last_name,
+      full_name: `${fixedName.firstName || normalizedProfile.first_name || ''} ${fixedName.lastName || normalizedProfile.last_name || ''}`.trim()
+    }
 
-    if (isProfileIncomplete(normalizedProfile)) {
+    if (
+      normalizedNameProfile.first_name !== userProfile.first_name ||
+      normalizedNameProfile.last_name !== userProfile.last_name ||
+      normalizedNameProfile.full_name !== userProfile.full_name
+    ) {
+      await supabase.from('profiles').update({
+        first_name: normalizedNameProfile.first_name,
+        last_name: normalizedNameProfile.last_name,
+        full_name: normalizedNameProfile.full_name,
+        updated_at: new Date().toISOString()
+      }).eq('id', userProfile.id)
+    }
+
+    setProfile(normalizedNameProfile)
+
+    if (isProfileIncomplete(normalizedNameProfile)) {
       await loadSettings(user.id)
       setScreen('complete-profile')
       return
     }
 
-    await Promise.all([loadSettings(user.id), loadCourses(normalizedProfile), loadHistory(user.id)])
+    await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id)])
 
     if (!isAdminRole(normalizedProfile.role)) {
       const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
-      const defaultTemplate = findBestTemplateForContext(normalizedProfile, null, templates)
+      const defaultTemplate = findBestTemplateForContext(normalizedNameProfile, null, templates)
       if (defaultTemplate?.id) await applyEvaluationTemplate(defaultTemplate.id)
     }
 
     const key = `${user.id}-${todayISO()}`
     if (recordedLoginRef.current !== key) {
       recordedLoginRef.current = key
-      recordLoginActivity(normalizedProfile)
+      recordLoginActivity(normalizedNameProfile)
     }
 
-    if (!isAdminRole(normalizedProfile.role) && normalizedProfile.has_seen_tutorial === false) {
+    if (!isAdminRole(normalizedNameProfile.role) && normalizedNameProfile.has_seen_tutorial === false) {
       setScreen('tutorial')
       return
     }
 
-    setScreen(isAdminRole(normalizedProfile.role) ? 'admin-dashboard' : 'dashboard')
+    if (shouldAutoNavigateFrom(screenRef.current)) {
+      setScreen(isAdminRole(normalizedNameProfile.role) ? 'admin-dashboard' : 'dashboard')
+    }
   }
 
   async function recordLoginActivity(userProfile) {
@@ -1257,6 +1321,63 @@ function App() {
     return data
   }
 
+  async function handleAddAllStudentCourses(cycleId, enrollmentType = 'regular') {
+    if (!session?.user) {
+      notify('error', 'Inicia sesión para agregar cursos.')
+      return null
+    }
+    if (!cycleId) {
+      notify('error', 'Selecciona un ciclo para agregar sus cursos.')
+      return null
+    }
+
+    const officialCourses = (availableCourses || []).filter((course) => course.cycle_id === cycleId && course.status === 'active')
+    if (!officialCourses.length) {
+      notify('error', 'No hay cursos oficiales cargados para este ciclo.')
+      return null
+    }
+
+    const currentIds = new Set((courses || []).filter((course) => course.cycle_id === cycleId).map((course) => course.id))
+    const missingCourses = officialCourses.filter((course) => !currentIds.has(course.id))
+
+    if (!missingCourses.length) {
+      notify('info', `Ya tienes agregados los ${officialCourses.length} cursos del ciclo seleccionado.`)
+      return { inserted: 0, existing: officialCourses.length }
+    }
+
+    const now = new Date().toISOString()
+    const rows = missingCourses.map((course) => ({
+      user_id: session.user.id,
+      course_id: course.id,
+      university_id: course.university_id || profile?.university_id || null,
+      faculty_id: course.faculty_id || profile?.faculty_id || null,
+      career_id: course.career_id || profile?.career_id || null,
+      cycle_id: course.cycle_id || cycleId,
+      enrollment_type: enrollmentType || 'regular',
+      status: 'visible',
+      updated_at: now
+    }))
+
+    const { error } = await supabase
+      .from('student_courses')
+      .upsert(rows, { onConflict: 'user_id,course_id' })
+
+    if (error) {
+      notify('error', getErrorMessage(error))
+      return null
+    }
+
+    await recordUsageEvent('course_bulk_added', {
+      cycle_id: cycleId,
+      enrollment_type: enrollmentType || 'regular',
+      added_count: missingCourses.length,
+      already_count: officialCourses.length - missingCourses.length
+    })
+    await loadCourses()
+    notify('success', `Se agregaron ${missingCourses.length} cursos. ${officialCourses.length - missingCourses.length} ya estaban en tu lista.`)
+    return { inserted: missingCourses.length, existing: officialCourses.length - missingCourses.length }
+  }
+
   async function handleHideStudentCourse(course) {
     if (!session?.user || !course?.id) return
     const targetId = course.student_course_id
@@ -1335,7 +1456,7 @@ function App() {
   }
 
   async function loadAdminData() {
-    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, templatesRes, componentsRes, usageRes, requestsRes] = await Promise.all([
+    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, careersRes, cyclesRes, templatesRes, componentsRes, usageRes, requestsRes] = await Promise.all([
       supabase.from('profiles').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
       supabase.from('courses').select(COURSE_SELECT_ADMIN).order('created_at', { ascending: false }),
       supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), evaluation_template:evaluation_templates(name)').order('created_at', { ascending: false }).limit(300),
@@ -1343,6 +1464,8 @@ function App() {
       supabase.from('student_courses').select('*, profile:profiles(first_name,last_name,email, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name))').order('created_at', { ascending: false }).limit(800),
       supabase.from('universities').select('*').order('name'),
       supabase.from('faculties').select('*, university:universities(id,name,code)').order('name'),
+      supabase.from('careers').select('*, faculty:faculties(id,name,university_id, university:universities(id,name,code))').order('name'),
+      supabase.from('cycles').select('*').order('order_number'),
       supabase.from('evaluation_templates').select('*, university:universities(name,code), faculty:faculties(name), career:careers(name), course:courses(name)').order('created_at', { ascending: false }),
       supabase.from('evaluation_components').select('*').order('component_order'),
       supabase.from('app_usage_events').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), course:courses(name)').order('created_at', { ascending: false }).limit(1000),
@@ -1357,6 +1480,8 @@ function App() {
       studentCourses: studentCoursesRes.data || [],
       universities: universitiesRes.data || [],
       faculties: facultiesRes.data || [],
+      careers: careersRes.data || [],
+      cycles: cyclesRes.data || [],
       templates: templatesRes.data || [],
       components: componentsRes.data || [],
       usageEvents: usageRes.data || [],
@@ -1537,7 +1662,7 @@ function App() {
               />
             )}
             {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
-            {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onHide={handleHideStudentCourse} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
+            {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onAddAll={handleAddAllStudentCourses} onHide={handleHideStudentCourse} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
               <CalculatorScreen
                 title="Calcular nota"
@@ -1843,7 +1968,7 @@ function Dashboard({ profile, courses, history, setScreen, onSelectCourse }) {
   )
 }
 
-function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, onAdd, onHide, onSelect }) {
+function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, onAdd, onAddAll, onHide, onSelect }) {
   const [cycleId, setCycleId] = useState(profile?.current_cycle_id || '')
   const [courseId, setCourseId] = useState('')
   const [enrollmentType, setEnrollmentType] = useState('regular')
@@ -1902,6 +2027,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
         )}
         <div className="action-row left">
           <button className="btn primary small" disabled={!courseId} onClick={addSelectedCourse}>➕ Agregar a Mis cursos</button>
+          <button className="btn secondary small" disabled={!cycleId || filteredAvailable.length === 0} onClick={() => onAddAll(cycleId, enrollmentType)}>📚 Agregar todos los cursos del ciclo</button>
           <button className="btn ghost small" onClick={() => setShowNewCourse(!showNewCourse)}>+ Solicitar curso no listado</button>
         </div>
         {showNewCourse && (
@@ -2313,17 +2439,22 @@ function AdminDashboard({ data, onLoad, setScreen }) {
   const byCycle = countBy(users, (u) => u.cycle?.name || 'Sin ciclo')
   const byUsage = countBy(usageEvents, (event) => eventLabel(event.event_type))
 
-  const universities = unique([...users, ...courses].map((item) => item.university?.code || item.university?.name).filter(Boolean))
-  const faculties = unique([...users, ...courses]
-    .filter((item) => !filters.university || (item.university?.code || item.university?.name) === filters.university)
-    .map((item) => item.faculty?.name)
-    .filter(Boolean))
-  const careers = unique([...users, ...courses]
-    .filter((item) => !filters.university || (item.university?.code || item.university?.name) === filters.university)
-    .filter((item) => !filters.faculty || item.faculty?.name === filters.faculty)
-    .map((item) => item.career?.name)
-    .filter(Boolean))
-  const cycles = unique([...users, ...courses].map((item) => item.cycle?.name).filter(Boolean))
+  const universityRows = data?.universities || []
+  const facultyRows = data?.faculties || []
+  const careerRows = data?.careers || []
+  const cycleRows = data?.cycles || []
+  const universities = universityRows.map((item) => item.code || item.name).filter(Boolean)
+  const selectedUniversityId = universityRows.find((item) => (item.code || item.name) === filters.university)?.id || ''
+  const faculties = facultyRows
+    .filter((item) => !selectedUniversityId || item.university_id === selectedUniversityId)
+    .map((item) => item.name)
+    .filter(Boolean)
+  const selectedFacultyId = facultyRows.find((item) => item.name === filters.faculty && (!selectedUniversityId || item.university_id === selectedUniversityId))?.id || ''
+  const careers = careerRows
+    .filter((item) => !selectedFacultyId || item.faculty_id === selectedFacultyId)
+    .map((item) => item.name)
+    .filter(Boolean)
+  const cycles = cycleRows.map((item) => item.name).filter(Boolean)
 
   const matchesContext = (item) => {
     const university = item?.university?.code || item?.university?.name || ''
@@ -2404,21 +2535,117 @@ function AdminDashboard({ data, onLoad, setScreen }) {
 
 function AdminUsers({ data, onLoad, onToggle, onRole }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const [q, setQ] = useState('')
-  const users = (data?.users || []).filter((u) => `${fullName(u)} ${u.email}`.toLowerCase().includes(q.toLowerCase()))
+  const [filters, setFilters] = useState({ q: '', status: '', activity: '' })
+  const rawUsers = data?.users || []
+  const studentCourses = data?.studentCourses || []
+  const calculations = data?.calculations || []
+  const logins = data?.logins || []
+  const usageEvents = data?.usageEvents || []
+
+  const courseStats = new Map()
+  studentCourses.forEach((item) => {
+    if (!item.user_id || item.status === 'hidden') return
+    courseStats.set(item.user_id, (courseStats.get(item.user_id) || 0) + 1)
+  })
+
+  const calculationStats = new Map()
+  calculations.forEach((item) => {
+    if (!item.user_id) return
+    calculationStats.set(item.user_id, (calculationStats.get(item.user_id) || 0) + 1)
+  })
+
+  const realActivityStats = new Map()
+  usageEvents.forEach((item) => {
+    if (!item.user_id) return
+    const prev = realActivityStats.get(item.user_id)
+    realActivityStats.set(item.user_id, safeMaxDate(prev, item.created_at))
+  })
+
+  const lastLoginStats = new Map()
+  logins.forEach((item) => {
+    if (!item.user_id) return
+    const prev = lastLoginStats.get(item.user_id)
+    lastLoginStats.set(item.user_id, safeMaxDate(prev, item.login_at))
+  })
+
+  const enrichedUsers = rawUsers.map((user) => {
+    const coursesCount = courseStats.get(user.id) || 0
+    const calculationsCount = calculationStats.get(user.id) || 0
+    const lastLogin = lastLoginStats.get(user.id) || null
+    const lastActivity = realActivityStats.get(user.id) || null
+    const realUse = coursesCount > 0 || calculationsCount > 0 || Boolean(lastActivity)
+    return {
+      ...user,
+      coursesCount,
+      calculationsCount,
+      lastLogin,
+      lastActivity,
+      realUse,
+      inactiveDays: daysSince(lastLogin),
+      realInactiveDays: daysSince(lastActivity)
+    }
+  })
+
+  const users = enrichedUsers.filter((user) => {
+    const text = `${fullName(user)} ${user.email} ${user.university?.code || ''} ${user.faculty?.name || ''} ${user.career?.name || ''} ${user.cycle?.name || ''}`.toLowerCase()
+    const matchesQ = text.includes(filters.q.toLowerCase())
+    const matchesStatus = !filters.status || user.status === filters.status
+    let matchesActivity = true
+    if (filters.activity === 'no-courses') matchesActivity = user.coursesCount === 0
+    if (filters.activity === 'no-calculations') matchesActivity = user.calculationsCount === 0
+    if (filters.activity === 'no-real') matchesActivity = !user.realUse
+    if (filters.activity === 'inactive-7') matchesActivity = user.inactiveDays === null || user.inactiveDays >= 7
+    if (filters.activity === 'inactive-15') matchesActivity = user.inactiveDays === null || user.inactiveDays >= 15
+    if (filters.activity === 'inactive-30') matchesActivity = user.inactiveDays === null || user.inactiveDays >= 30
+    return matchesQ && matchesStatus && matchesActivity
+  })
+
+  const withoutCourses = enrichedUsers.filter((u) => u.coursesCount === 0).length
+  const withoutRealUse = enrichedUsers.filter((u) => !u.realUse).length
+  const inactive30 = enrichedUsers.filter((u) => u.inactiveDays === null || u.inactiveDays >= 30).length
+
   return (
     <div className="page fade-in">
-      <Header title="Usuarios" subtitle="Ver, dar de baja, reactivar y cambiar rol." />
-      <input className="input" placeholder="Buscar usuario o correo" value={q} onChange={(e) => setQ(e.target.value)} />
+      <Header title="Usuarios" subtitle="Ver actividad, cursos registrados, última conexión y estado." />
+      <div className="cards stats-grid">
+        <StatCard icon="👥" label="Usuarios" value={rawUsers.length} />
+        <StatCard icon="📚" label="Sin cursos" value={withoutCourses} />
+        <StatCard icon="🔥" label="Sin uso real" value={withoutRealUse} />
+        <StatCard icon="🕒" label="Inactivos 30+ días" value={inactive30} />
+      </div>
+      <div className="filters admin-course-filters">
+        <input className="input" placeholder="Buscar usuario, correo o contexto" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+        <select className="input" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+          <option value="">Todos los estados</option>
+          <option value="active">Activos</option>
+          <option value="inactive">Dados de baja</option>
+        </select>
+        <select className="input" value={filters.activity} onChange={(e) => setFilters({ ...filters, activity: e.target.value })}>
+          <option value="">Todos los usuarios</option>
+          <option value="no-courses">Sin cursos registrados</option>
+          <option value="no-calculations">Sin cálculos guardados</option>
+          <option value="no-real">Sin actividad real</option>
+          <option value="inactive-7">Inactivos 7+ días</option>
+          <option value="inactive-15">Inactivos 15+ días</option>
+          <option value="inactive-30">Inactivos 30+ días</option>
+        </select>
+      </div>
       <div className="admin-list admin-scroll-list">
         {users.map((user) => (
           <Card key={user.id}>
             <div className="list-row">
               <div>
                 <h3>{fullName(user)}</h3>
-                <p>{user.email} · {user.career?.name || 'Sin carrera'} · {user.cycle?.name || 'Sin ciclo'}</p>
+                <p>{user.email} · {user.university?.code || 'Sin universidad'} · {user.career?.name || 'Sin carrera'} · {user.cycle?.name || 'Sin ciclo'}</p>
+                <p className="hint">Última conexión: <b>{formatLastSeen(user.lastLogin)}</b> · Inactividad: <b>{inactivityLabel(user.lastLogin)}</b></p>
+                <p className="hint">Última actividad real: <b>{formatLastSeen(user.lastActivity)}</b> · Uso real: <b>{user.realUse ? 'Sí' : 'No'}</b></p>
               </div>
               <span className={`badge ${user.status}`}>{formatStatus(user.status)}</span>
+            </div>
+            <div className="mini-stats-row">
+              <StatBox label="Cursos" value={user.coursesCount} />
+              <StatBox label="Cálculos" value={user.calculationsCount} />
+              <StatBox label="Rol" value={formatRole(user.role)} />
             </div>
             <div className="action-row left">
               <button className="btn secondary small" onClick={() => onToggle(user)}>{user.status === 'active' ? 'Dar de baja' : 'Reactivar'}</button>
@@ -2433,27 +2660,20 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
 
 function AdminCourses({ data, onLoad, onUpdate }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const [filters, setFilters] = useState({ q: '', university: '', faculty: '', career: '', cycle: '' })
+  const [filters, setFilters] = useState({ q: '', universityId: '', facultyId: '', careerId: '', cycleId: '' })
   const allCourses = data?.courses || []
-  const universities = unique(allCourses.map((c) => c.university?.code || c.university?.name).filter(Boolean))
-  const faculties = unique(allCourses
-    .filter((c) => !filters.university || (c.university?.code || c.university?.name) === filters.university)
-    .map((c) => c.faculty?.name)
-    .filter(Boolean))
-  const careers = unique(allCourses
-    .filter((c) => !filters.university || (c.university?.code || c.university?.name) === filters.university)
-    .filter((c) => !filters.faculty || c.faculty?.name === filters.faculty)
-    .map((c) => c.career?.name)
-    .filter(Boolean))
-  const cycles = unique(allCourses.map((c) => c.cycle?.name).filter(Boolean))
+  const universities = data?.universities || []
+  const faculties = (data?.faculties || []).filter((faculty) => !filters.universityId || faculty.university_id === filters.universityId)
+  const careers = (data?.careers || []).filter((career) => !filters.facultyId || career.faculty_id === filters.facultyId)
+  const cycles = data?.cycles || []
 
   const courses = allCourses.filter((course) => {
     const contextText = `${course.name} ${creatorName(course)} ${course.university?.code || ''} ${course.faculty?.name || ''} ${course.career?.name || ''} ${course.cycle?.name || ''}`.toLowerCase()
     const matchesQ = contextText.includes(filters.q.toLowerCase())
-    const matchesUniversity = !filters.university || (course.university?.code || course.university?.name) === filters.university
-    const matchesFaculty = !filters.faculty || course.faculty?.name === filters.faculty
-    const matchesCareer = !filters.career || course.career?.name === filters.career
-    const matchesCycle = !filters.cycle || course.cycle?.name === filters.cycle
+    const matchesUniversity = !filters.universityId || course.university_id === filters.universityId
+    const matchesFaculty = !filters.facultyId || course.faculty_id === filters.facultyId
+    const matchesCareer = !filters.careerId || course.career_id === filters.careerId
+    const matchesCycle = !filters.cycleId || course.cycle_id === filters.cycleId
     return matchesQ && matchesUniversity && matchesFaculty && matchesCareer && matchesCycle
   })
 
@@ -2462,20 +2682,20 @@ function AdminCourses({ data, onLoad, onUpdate }) {
       <Header title="Cursos" subtitle="Editar nombres, ver creador y dar de baja cursos." />
       <div className="filters admin-course-filters">
         <input className="input" placeholder="Buscar curso, creador o contexto" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
-        <select className="input" value={filters.university} onChange={(e) => setFilters({ ...filters, university: e.target.value, faculty: '', career: '' })}>
-          <option value="">Todas las universidades</option>{universities.map((u) => <option key={u}>{u}</option>)}
+        <select className="input" value={filters.universityId} onChange={(e) => setFilters({ ...filters, universityId: e.target.value, facultyId: '', careerId: '' })}>
+          <option value="">Todas las universidades</option>{universities.map((u) => <option key={u.id} value={u.id}>{u.code || u.name}</option>)}
         </select>
-        <select className="input" value={filters.faculty} onChange={(e) => setFilters({ ...filters, faculty: e.target.value, career: '' })}>
-          <option value="">Todas las facultades</option>{faculties.map((f) => <option key={f}>{f}</option>)}
+        <select className="input" value={filters.facultyId} onChange={(e) => setFilters({ ...filters, facultyId: e.target.value, careerId: '' })}>
+          <option value="">Todas las facultades</option>{faculties.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
-        <select className="input" value={filters.career} onChange={(e) => setFilters({ ...filters, career: e.target.value })}>
-          <option value="">Todas las carreras</option>{careers.map((c) => <option key={c}>{c}</option>)}
+        <select className="input" value={filters.careerId} onChange={(e) => setFilters({ ...filters, careerId: e.target.value })}>
+          <option value="">Todas las carreras</option>{careers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select className="input" value={filters.cycle} onChange={(e) => setFilters({ ...filters, cycle: e.target.value })}>
-          <option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c}>{c}</option>)}
+        <select className="input" value={filters.cycleId} onChange={(e) => setFilters({ ...filters, cycleId: e.target.value })}>
+          <option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </div>
-      {courses.length === 0 && <Empty text="No hay cursos para los filtros seleccionados. Revisa que se haya ejecutado la migración v1.1.2." compact />}
+      {courses.length === 0 && <Empty text="No hay cursos para los filtros seleccionados. La carrera puede no tener cursos activos cargados todavía." compact />}
       <div className="admin-list admin-scroll-list">
         {courses.map((course) => <AdminCourseCard key={course.id} course={course} onUpdate={onUpdate} />)}
       </div>

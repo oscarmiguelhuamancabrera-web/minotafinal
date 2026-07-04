@@ -554,3 +554,20 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
 .compact-list {
   max-height: 320px;
 }
+
+/* v1.1.7 */
+.mini-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.mini-stats-row .stat-box {
+  min-width: 110px;
+}
+
+.warning-hint {
+  color: #7c3aed;
+  font-weight: 600;
+}
