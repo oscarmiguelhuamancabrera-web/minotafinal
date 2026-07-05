@@ -1,57 +1,93 @@
-# Mi Nota Final Web v1.2.2
+# Mi Nota Final Web/PWA v1.1.8
 
-Versión de corrección sobre la línea 1.2 con lectura automática de imagen y modo manual avanzado oculto.
+Aplicación React + Vite + Supabase + Vercel para cálculo académico de notas.
 
-## Cambios principales
+## Cambios principales v1.1.8
 
-- Corrección del prellenado de nombres/apellidos de Google en **Completa tu perfil**.
-- Modo invitado: ajustes temporales; si recarga la página, vuelve a valores por defecto.
-- Alumno registrado: puede cambiar solo porcentajes y nota mínima para su cuenta.
-- Alumno no puede cambiar nombres de evaluaciones ni componentes.
-- Admin/superadmin: puede editar plantillas globales.
-- Calculadora: ya no permite crear cursos nuevos; solo seleccionar cursos existentes.
-- Cursos no listados: ahora se solicitan para revisión del administrador.
-- Validación de cursos similares para evitar duplicados como “Geo” vs “Geometría Analítica”.
-- Registro de quién solicita cursos nuevos.
-- Analítica de uso real: cálculo realizado, resultado guardado, curso agregado, ajustes modificados, etc.
-- Dashboard admin con métricas de usuarios con uso real y usuarios que solo iniciaron sesión.
-- Gráficos del admin con mejor orden, top y agrupación “Otros”.
+- Nuevo **Centro de comunicación**.
+- Admin/superadmin puede publicar **Anuncios / Novedades** administrables.
+- Los anuncios pueden tener tipo, prioridad, estado, fecha de inicio/fin y destinatarios por universidad, facultad, carrera, ciclo o rol.
+- El estudiante puede ver anuncios activos desde Inicio y desde **Avisos y sugerencias**.
+- El estudiante puede enviar **Sugerencias / Reportar problema**.
+- El admin/superadmin puede responder sugerencias y cambiar estado: pendiente, en revisión, resuelto o rechazado.
+- El estudiante puede ver la respuesta del administrador dentro de la app.
+- Se excluye admin/superadmin de métricas estudiantiles del dashboard admin.
 
-## SQL requerido
+## Supabase
 
-Ejecutar primero en Supabase:
+Ejecutar antes de publicar:
 
-```text
-supabase/migration_v1_1_6_mejoras_uso_cursos.sql
+```sql
+supabase/migration_v1_1_8_anuncios_sugerencias.sql
 ```
 
-## Publicación
+Si vienes desde una versión anterior, mantener ejecutadas las migraciones previas, especialmente:
+
+```text
+supabase/migration_v1_1_7_admin_cursos_analytics.sql
+```
+
+Scripts auxiliares incluidos:
+
+```text
+supabase/sync_consolidado_upsjb_uai_courses_fix3_seguro.sql
+supabase/validar_comparar_cursos_upsjb_uai.sql
+```
+
+## Desarrollo local
+
+```bash
+npm install
+npm run dev
+```
+
+## Publicar
 
 ```bash
 git status
 git add .
-git commit -m "Version 1.2.2 lectura automatica de notas desde imagen"
+git commit -m "Version 1.1.8 anuncios sugerencias"
 git push origin main
 ```
 
-Si tu rama local está como `master`:
+## Corrección v1.1.8-fix-modal
 
-```bash
-git push origin HEAD:main
+- Se agregó el botón **Avisos** en la barra superior de escritorio.
+- Se agregó acceso rápido **Avisos y sugerencias** en el panel principal del estudiante.
+- Se implementó anuncio tipo **Ventana flotante**.
+- La ventana flotante puede mostrar texto o imagen.
+- La imagen se carga desde el panel admin y solo se usa para la ventana flotante.
+- Se registra el cierre del anuncio por usuario para evitar repetirlo según la frecuencia configurada.
+
+Antes de publicar, vuelve a ejecutar:
+
+```sql
+supabase/migration_v1_1_8_anuncios_sugerencias.sql
 ```
 
 
-## Cambios v1.2.2
+## Fix modal 2
 
-- Botón **Agregar todos los cursos del ciclo** en Mis cursos.
-- Admin/Usuarios muestra cursos registrados, cálculos, última conexión, última actividad real e inactividad.
-- Filtros de usuarios: sin cursos, sin actividad real, inactivos 7/15/30 días.
-- Admin/Cursos carga carreras desde `public.careers`, no solo desde cursos existentes.
-- Corrección para evitar que la app regrese sola a Inicio después de refrescos de sesión.
-- Calculadora: sección **Leer notas desde imagen** con vista previa y parser de texto reconocido para aplicar notas detectadas.
-- Corrección: el bloque **Leer notas desde imagen** ahora se muestra siempre en Calcular; si no hay curso/plantilla, aparece deshabilitado con mensaje de ayuda.
-- Se incluyen scripts de sincronización y validación de mallas UPSJB + UAI en `supabase/`.
+- Corrige la carga de sugerencias para admin/superadmin.
+- El panel de comunicación refresca la data administrativa al abrirse.
+- Las sugerencias enviadas por alumnos se muestran al superadmin desde Comunicación → Sugerencias.
 
-- Calculadora: el flujo principal de **Leer notas desde imagen** ahora intenta OCR automático al seleccionar la captura.
-- Se oculta la caja de texto manual y queda como **modo manual avanzado** solo para casos donde el OCR falle.
-- El botón **Detectar notas** se habilita cuando hay texto leído automáticamente o texto pegado manualmente.
+
+## Fix incluido: sugerencias visibles para superadmin
+
+Ejecutar en Supabase después de la migración principal:
+
+```sql
+supabase/migration_v1_1_8_fix_sugerencias_superadmin.sql
+```
+
+Correcciones:
+- El panel de Comunicación carga sugerencias sin joins embebidos ambiguos.
+- El filtro de sugerencias ahora inicia en “Todos los estados”.
+- Se refuerzan políticas RLS para admin/superadmin.
+
+## Fix incluido
+- Corrige la carga de respuestas de sugerencias para alumnos.
+- La vista del alumno vuelve a consultar sus reportes al abrir Avisos/Comunicación.
+- La consulta de sugerencias del alumno ya no usa joins embebidos con profiles para evitar errores por relaciones ambiguas.
+- Último script Supabase a ejecutar: `supabase/migration_v1_1_8_fix_respuestas_usuario_final.sql`.
