@@ -2645,14 +2645,16 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
             ))}
           </div>
         )}
-        <button type="button" className="link-button" disabled={!canUseImageReader || ocrStatus === 'reading'} onClick={() => setShowManualOcr((value) => !value)}>
-          {showManualOcr ? 'Ocultar texto reconocido' : 'Revisar o pegar texto manualmente'}
-        </button>
+        {ocrStatus !== 'idle' && (
+          <button type="button" className="link-button" disabled={!canUseImageReader || ocrStatus === 'reading'} onClick={() => setShowManualOcr((value) => !value)}>
+            {showManualOcr ? 'Ocultar texto detectado' : 'Revisar texto detectado (opcional)'}
+          </button>
+        )}
         {showManualOcr && (
           <textarea
             className="input text-area"
             disabled={!canUseImageReader || ocrStatus === 'reading'}
-            placeholder={'Ejemplo:\nPC1 16\nPC2 14\nExamen parcial 15'}
+            placeholder={'Puedes corregir el texto detectado.\nEjemplo:\nPC1 16\nPC2 14\nExamen parcial 15'}
             value={ocrText}
             onChange={(event) => setOcrText(event.target.value)}
           />
