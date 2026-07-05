@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createWorker } from 'tesseract.js'
 import { supabase } from './lib/supabase'
+import { parseGradeText } from './utils/ocr'
 import {
   DEFAULT_SETTINGS,
   EVALUATIONS,
@@ -227,76 +228,6 @@ function eventLabel(type) {
   return labels[type] || type || 'Evento'
 }
 
-function normalizeForMatching(value = '') {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9ñ\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function parseGradeText(text = '', items = []) {
-  const normalizedItems = (items || []).map((item) => ({
-    ...item,
-    token: normalizeForMatching(`${item.key || ''} ${item.label || ''} ${item.name || ''}`)
-  }))
-  const aliases = [
-    ['pc1', 'pc 1', 'practica 1', 'practica calificada 1', 'práctica calificada 1'],
-    ['pc2', 'pc 2', 'practica 2', 'practica calificada 2', 'práctica calificada 2'],
-    ['pc3', 'pc 3', 'practica 3', 'practica calificada 3', 'práctica calificada 3'],
-    ['pc4', 'pc 4', 'practica 4', 'practica calificada 4', 'práctica calificada 4'],
-    ['ep', 'examen parcial', 'parcial'],
-    ['ef', 'examen final', 'final']
-  ]
-  const lines = String(text || '')
-    .split(/\n+/)
-    .map((line) => cleanText(line))
-    .filter(Boolean)
-
-  function findItem(line) {
-    const normalizedLine = normalizeForMatching(line)
-    const aliasGroup = aliases.find((group) => group.some((alias) => normalizedLine.includes(normalizeForMatching(alias))))
-    if (aliasGroup) {
-      const match = normalizedItems.find((item) => aliasGroup.some((alias) => item.token.includes(normalizeForMatching(alias))))
-      if (match) return match
-    }
-    return normalizedItems.find((item) => {
-      const candidates = [item.key, item.label, item.name]
-        .map(normalizeForMatching)
-        .filter((candidate) => candidate.length >= 2)
-      return candidates.some((candidate) => normalizedLine.includes(candidate))
-    }) || null
-  }
-
-  const detected = new Map()
-  lines.forEach((line) => {
-    const normalizedLine = normalizeForMatching(line)
-    if (/\b(pf|pp)\b/.test(normalizedLine) || normalizedLine.includes('promedio final')) return
-    if (/\ber\b/.test(normalizedLine) || normalizedLine.includes('examen rezagado')) return
-    const item = findItem(line)
-    if (!item) return
-    const values = (line.match(/\b(?:20(?:[.,]0+)?|1?\d(?:[.,]\d{1,2})?)\b/g) || [])
-      .map(toNumber)
-      .filter((value) => value !== null && value >= 0 && value <= 20)
-    const score = values.length ? values[values.length - 1] : null
-    const previous = detected.get(item.key)
-    // En capturas largas puede aparecer primero un resumen de otro curso y
-    // después la tabla vigente. Conservamos la última nota válida detectada.
-    if (!previous || score !== null || previous.score === null) {
-      detected.set(item.key, {
-        key: item.key,
-        label: item.label || item.name || item.key,
-        score,
-        sourceLine: line
-      })
-    }
-  })
-
-  return Array.from(detected.values())
-}
-
 let ocrWorkerPromise = null
 let ocrProgressListener = null
 
@@ -311,7 +242,7 @@ async function getOcrWorker(onProgress) {
       }
     }).then(async (worker) => {
       await worker.setParameters({
-        tessedit_pageseg_mode: '3',
+        tessedit_pageseg_mode: '6',
         preserve_interword_spaces: '1',
         user_defined_dpi: '300'
       })

@@ -115,8 +115,16 @@
 
 **Muestra validada 1 — UPSJB:**
 
-- Confianza OCR obtenida: 87%.
+- Confianza OCR obtenida: 86%.
 - Detecta PC1 `11.67`, PC2 `12.33`, PC3 `17.50` y parcial `20.00`.
 - Ignora promedio final `16.00`, promedio `15.73` y examen rezagado.
 - PC4 y examen final permanecen pendientes.
 - Se prioriza la última nota válida cuando la captura contiene bloques duplicados.
+
+**Muestra validada 2 — tabla por unidades:**
+
+- Confianza OCR obtenida: 86%.
+- Detecta FK1/FK2 de primera y segunda unidad, además de U1 y U2.
+- Corrige confusiones visuales frecuentes como `FKI` → `FK1` y `ul` → `U1`.
+- Distingue el porcentaje de la nota.
+- FK1/FK2 de tercera unidad y U3 permanecen pendientes.
