@@ -91,3 +91,58 @@
 - El botón de agregado masivo usa siempre `current_cycle_id` del perfil del estudiante.
 - Cambiar el combo a otro ciclo no cambia el ciclo usado por el agregado masivo.
 - El botón queda deshabilitado si el perfil no tiene ciclo o si no existen cursos para su ciclo habilitado.
+
+## REQ-006 — Autocompletar calificaciones desde una imagen
+
+**Estado:** Implementado en rama de desarrollo, pendiente de validar con capturas reales de notas
+
+**Resultado implementado:**
+
+- El estudiante selecciona un curso o plantilla antes de usar el lector.
+- Puede cargar una captura o fotografía de hasta 10 MB.
+- La imagen se procesa localmente en el navegador con Tesseract.js.
+- Se mejora contraste y resolución antes del reconocimiento.
+- Las calificaciones detectadas se muestran en campos editables.
+- Solo se aplican a la calculadora después de la confirmación del estudiante.
+- Se validan valores entre 0 y 20.
+- Existe un modo manual para revisar o pegar el texto cuando el OCR no sea suficiente.
+
+**Validación pendiente:**
+
+- Probar con capturas reales de cada universidad soportada.
+- Ampliar alias cuando una plataforma use nombres diferentes para las evaluaciones.
+- Medir precisión, tiempo de lectura y consumo de memoria en celulares.
+
+**Muestra validada 1 — UPSJB:**
+
+- Confianza OCR obtenida: 86%.
+- Detecta PC1 `11.67`, PC2 `12.33`, PC3 `17.50` y parcial `20.00`.
+- Ignora promedio final `16.00`, promedio `15.73` y examen rezagado.
+- PC4 y examen final permanecen pendientes.
+- Se prioriza la última nota válida cuando la captura contiene bloques duplicados.
+
+**Muestra validada 2 — tabla por unidades:**
+
+- Confianza OCR obtenida: 86%.
+- Detecta FK1/FK2 de primera y segunda unidad, además de U1 y U2.
+- Corrige confusiones visuales frecuentes como `FKI` → `FK1` y `ul` → `U1`.
+- Distingue el porcentaje de la nota.
+- FK1/FK2 de tercera unidad y U3 permanecen pendientes.
+
+## REQ-007 — Perfiles OCR separados por universidad
+
+**Estado:** Pendiente de estructuración
+
+**Regla de diseño:**
+
+- Tesseract.js seguirá siendo el motor común para reconocer texto.
+- Cada universidad tendrá un perfil de interpretación independiente.
+- UPSJB usará códigos como PC1–PC4, EP y EF, excluyendo PF, PP y ER.
+- UAI usará componentes por unidad como FK1_1, FK2_1, U1, FK1_2, FK2_2 y U2.
+- La aplicación elegirá el perfil mediante la universidad del curso o de la plantilla seleccionada.
+- Las reglas y correcciones de una universidad no deben alterar los resultados de otra.
+
+**Muestras asociadas:**
+
+- Muestra 1: UPSJB.
+- Muestra 2: UAI.

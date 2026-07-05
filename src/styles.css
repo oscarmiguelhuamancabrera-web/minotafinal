@@ -319,6 +319,140 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   }
 }
 
+/* OCR local para autocompletar calificaciones */
+.image-reader-card {
+  overflow: hidden;
+}
+
+.image-reader-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(260px, 1.35fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.file-drop {
+  min-height: 110px;
+  border: 1.5px dashed rgba(126, 58, 242, 0.4);
+  border-radius: 18px;
+  background: rgba(126, 58, 242, 0.06);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  padding: 18px;
+  color: #5b21b6;
+  font-weight: 800;
+  cursor: pointer;
+  text-align: center;
+}
+
+.file-drop input {
+  display: none;
+}
+
+.file-drop small {
+  color: #7c6aa3;
+  font-weight: 500;
+}
+
+.file-drop.disabled,
+.disabled-card .text-area {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.disabled-card {
+  border-style: dashed;
+}
+
+.image-preview {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 18px;
+  border: 1px solid var(--purple-border);
+  background: #faf7ff;
+}
+
+.ocr-status {
+  margin-top: 12px;
+  border: 1px solid var(--purple-border);
+  border-radius: 16px;
+  background: #fbf8ff;
+  padding: 12px 14px;
+  color: #4c1d95;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 10px;
+  margin: 8px 0 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(126, 58, 242, 0.12);
+}
+
+.progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7e3af2, #c084fc);
+  transition: width 0.25s ease;
+}
+
+.detected-grade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.detected-grade-grid label {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--purple-border);
+  border-radius: 16px;
+  background: #fbf8ff;
+  color: #4c1d95;
+  font-weight: 800;
+}
+
+.detected-grade-grid .grade {
+  background: #fff;
+}
+
+.link-button {
+  border: 0;
+  background: transparent;
+  color: #6d28d9;
+  font-weight: 800;
+  padding: 10px 0;
+  cursor: pointer;
+}
+
+.link-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.text-area {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.success-hint {
+  color: #15803d;
+  font-weight: 700;
+}
+
+@media (max-width: 820px) {
+  .image-reader-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Ajustes v1.0.3 */
 .toast.info { border-color: #bfdbfe; color: #1d4ed8; }
 .social-button {
