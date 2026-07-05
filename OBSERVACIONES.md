@@ -40,3 +40,23 @@
 - Cambiar varias veces el filtro de ciclo y comprobar que “Mis cursos” no se altere.
 - Cambiar el ciclo desde el perfil y comprobar que los cursos del ciclo anterior se limpien.
 - Confirmar que después del cambio de perfil se carguen únicamente opciones correspondientes al nuevo ciclo.
+
+## REQ-003 — Conservar los datos académicos ingresados durante el registro
+
+**Estado:** Implementado en migración, pendiente de aplicar y validar
+
+**Observación:** Después de registrarse e iniciar sesión, el estudiante vuelve a la pantalla “Completa tu perfil” y debe seleccionar nuevamente su universidad.
+
+**Diagnóstico:** El registro envía `university_id`, `faculty_id`, `career_id` y `current_cycle_id` dentro de los metadatos de Auth. Sin embargo, la función `public.handle_new_user()` que crea el registro en `public.profiles` solo copia carrera y ciclo; no guarda universidad ni facultad. Como `isProfileIncomplete()` exige ambos campos, la aplicación muestra nuevamente la pantalla de perfil.
+
+**Resultado esperado:**
+
+- El registro debe guardar universidad, facultad, carrera y ciclo en `public.profiles`.
+- Después de confirmar el correo e iniciar sesión, el estudiante no debe volver a ingresar esos datos.
+- Los datos académicos deben conservarse también al recargar la aplicación.
+- La pantalla “Completa tu perfil” debe mostrarse únicamente cuando realmente falte información.
+
+**Impacto en base de datos:**
+
+- Requiere actualizar la función trigger `public.handle_new_user()` mediante una migración.
+- Puede requerir completar perfiles existentes cuyos campos `university_id` o `faculty_id` hayan quedado nulos.
