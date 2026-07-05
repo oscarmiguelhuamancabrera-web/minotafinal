@@ -22,6 +22,19 @@ import {
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
 const APP_VERSION = '1.1.8-fix-modal'
 
+const GUIDED_TOUR_STEPS = [
+  { screen: 'courses', target: 'course-overview', title: 'Agrega tus cursos', text: 'Este es el punto de partida. Aquí eliges únicamente los cursos que estás llevando.' },
+  { screen: 'courses', target: 'course-cycle', title: 'Filtra por ciclo', text: 'Este selector solo cambia los cursos disponibles. No modifica el ciclo guardado en tu perfil.' },
+  { screen: 'courses', target: 'course-picker', title: 'Selecciona un curso', text: 'Elige un curso de la lista y, si corresponde, indica si es regular, arrastrado, adelantado o electivo.' },
+  { screen: 'courses', target: 'course-add', title: 'Agrégalo a tu lista', text: 'Puedes agregar uno o todos los cursos de tu ciclo actual.' },
+  { screen: 'courses', target: 'current-courses', title: 'Tus cursos actuales', text: 'Desde aquí podrás abrir la calculadora del curso que quieras revisar.' },
+  { screen: 'calculator', target: 'calculator-course', title: 'Selecciona qué calcular', text: 'En la calculadora puedes cambiar entre los cursos que agregaste.' },
+  { screen: 'calculator', target: 'calculator-ocr', title: 'Carga tus notas desde una imagen', text: 'Puedes tomar una foto o subir una captura. Siempre revisarás los valores antes de aplicarlos.' },
+  { screen: 'calculator', target: 'calculator-grades', title: 'Revisa tus calificaciones', text: 'También puedes escribir o corregir cada nota manualmente. Deja vacío lo que aún esté pendiente.' },
+  { screen: 'calculator', target: 'calculator-actions', title: 'Calcula tu resultado', text: 'Calcula tu avance o genera valores orientativos para las evaluaciones pendientes.' },
+  { screen: 'calculator', target: 'calculator-save', title: 'Guarda cuando quieras', text: 'El resultado solo se guarda cuando presionas este botón. ¡Ya estás listo para comenzar!' }
+]
+
 const emptyAuth = {
   firstName: '',
   lastName: '',
@@ -538,6 +551,7 @@ function App() {
   const [guestMode, setGuestMode] = useState(false)
   const [notice, setNotice] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [guidedTourStep, setGuidedTourStep] = useState(null)
   const recordedLoginRef = useRef('')
   const screenRef = useRef(screen)
 
@@ -1217,7 +1231,12 @@ function App() {
     notify('info', 'Disponible próximamente.')
   }
 
-  async function handleFinishTutorial() {
+  function startGuidedTour() {
+    setGuidedTourStep(0)
+    setScreen(GUIDED_TOUR_STEPS[0].screen)
+  }
+
+  async function completeTutorial(destination = 'courses') {
     if (!session?.user) return
     const { error } = await supabase
       .from('profiles')
@@ -1228,7 +1247,26 @@ function App() {
       return
     }
     setProfile((prev) => prev ? { ...prev, has_seen_tutorial: true } : prev)
-    setScreen('calculator')
+    setGuidedTourStep(null)
+    setScreen(destination)
+  }
+
+  function advanceGuidedTour() {
+    if (guidedTourStep === null) return
+    const next = guidedTourStep + 1
+    if (next >= GUIDED_TOUR_STEPS.length) {
+      completeTutorial('dashboard')
+      return
+    }
+    setGuidedTourStep(next)
+    setScreen(GUIDED_TOUR_STEPS[next].screen)
+  }
+
+  function returnGuidedTour() {
+    if (guidedTourStep === null || guidedTourStep <= 0) return
+    const previous = guidedTourStep - 1
+    setGuidedTourStep(previous)
+    setScreen(GUIDED_TOUR_STEPS[previous].screen)
   }
 
   async function handlePasswordReset(email) {
@@ -2005,7 +2043,7 @@ function App() {
           <CompleteProfile universities={universities} faculties={faculties} careers={careers} cycles={cycles} profile={profile} onSubmit={handleUpdateProfile} />
         )}
         {session && screen === 'tutorial' && (
-          <OnboardingTutorial onStart={handleFinishTutorial} onSkip={handleFinishTutorial} />
+          <OnboardingTutorial onStart={startGuidedTour} onSkip={() => completeTutorial('courses')} />
         )}
         {(session || guestMode) && (
           <AuthenticatedLayout
@@ -2117,6 +2155,16 @@ function App() {
           </AuthenticatedLayout>
         )}
       </main>
+      {session && guidedTourStep !== null && (
+        <GuidedTour
+          step={GUIDED_TOUR_STEPS[guidedTourStep]}
+          stepIndex={guidedTourStep}
+          totalSteps={GUIDED_TOUR_STEPS.length}
+          onBack={returnGuidedTour}
+          onNext={advanceGuidedTour}
+          onSkip={() => completeTutorial('courses')}
+        />
+      )}
     </div>
   )
 }
@@ -2175,6 +2223,66 @@ function OnboardingTutorial({ onStart, onSkip }) {
       </div>
       <Footer />
     </section>
+  )
+}
+
+function GuidedTour({ step, stepIndex, totalSteps, onBack, onNext, onSkip }) {
+  const [targetRect, setTargetRect] = useState(null)
+  const [mobile, setMobile] = useState(() => window.innerWidth <= 720)
+
+  useEffect(() => {
+    const target = document.querySelector(`[data-tour="${step.target}"]`)
+    const updatePosition = () => {
+      setMobile(window.innerWidth <= 720)
+      setTargetRect(target?.getBoundingClientRect() || null)
+    }
+
+    target?.classList.add('guided-tour-target')
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+    const animationFrame = window.requestAnimationFrame(updatePosition)
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+      target?.classList.remove('guided-tour-target')
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [step.target])
+
+  let cardStyle = undefined
+  if (!mobile && targetRect) {
+    const width = 360
+    const estimatedHeight = 230
+    const left = Math.max(16, Math.min(window.innerWidth - width - 16, targetRect.left + (targetRect.width / 2) - (width / 2)))
+    const fitsBelow = targetRect.bottom + estimatedHeight + 24 < window.innerHeight
+    const top = fitsBelow
+      ? targetRect.bottom + 14
+      : Math.max(16, targetRect.top - estimatedHeight - 14)
+    cardStyle = { left, top, width }
+  }
+
+  return (
+    <>
+      <div className="guided-tour-backdrop" aria-hidden="true" />
+      <aside className={`guided-tour-card ${mobile ? 'mobile' : ''}`} style={cardStyle} role="dialog" aria-modal="true" aria-label="Visita guiada">
+        <div className="guided-tour-progress">
+          <span>Paso {stepIndex + 1} de {totalSteps}</span>
+          <div><i style={{ width: `${((stepIndex + 1) / totalSteps) * 100}%` }} /></div>
+        </div>
+        <h2>{step.title}</h2>
+        <p>{step.text}</p>
+        {!targetRect && <small>Este elemento estará disponible cuando tengas información cargada.</small>}
+        <div className="guided-tour-actions">
+          <button className="btn ghost small" onClick={onSkip}>Omitir</button>
+          <div>
+            <button className="btn secondary small" disabled={stepIndex === 0} onClick={onBack}>Atrás</button>
+            <button className="btn primary small" onClick={onNext}>{stepIndex + 1 === totalSteps ? 'Finalizar' : 'Siguiente'}</button>
+          </div>
+        </div>
+      </aside>
+    </>
   )
 }
 
@@ -2420,15 +2528,16 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   return (
     <div className="page fade-in">
       <Header title="Mis cursos" subtitle={academicContext(profile)} />
+      <div data-tour="course-overview">
       <Card>
         <h3>Agregar curso a mi lista</h3>
         <p className="hint">Puedes agregar cursos de tu ciclo actual, cursos arrastrados, adelantados, electivos u otros. Tu página principal mostrará solo estos cursos.</p>
         <div className="grid three">
-          <select className="input" value={cycleId} onChange={(e) => { setCycleId(e.target.value); setCourseId('') }}>
+          <select className="input" data-tour="course-cycle" value={cycleId} onChange={(e) => { setCycleId(e.target.value); setCourseId('') }}>
             <option value="">Todos los ciclos</option>
             {cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
           </select>
-          <select className="input" value={courseId} onChange={(e) => setCourseId(e.target.value)}>
+          <select className="input" data-tour="course-picker" value={courseId} onChange={(e) => setCourseId(e.target.value)}>
             <option value="">Selecciona curso</option>
             {filteredAvailable.map((course) => <option key={course.id} value={course.id}>{courseCycleName(course)} · {course.name}</option>)}
           </select>
@@ -2444,7 +2553,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
         {filteredAvailable.length === 0 && (
           <p className="hint warning-hint">No hay cursos oficiales cargados para este contexto académico y ciclo. Puedes solicitar un curso no listado.</p>
         )}
-        <div className="action-row left">
+        <div className="action-row left" data-tour="course-add">
           <button className="btn primary small" disabled={!courseId} onClick={addSelectedCourse}>➕ Agregar a Mis cursos</button>
           <button className="btn secondary small" disabled={!profile?.current_cycle_id || profileCycleCourses.length === 0} onClick={() => onAddAll(enrollmentType)}>📚 Agregar todos los cursos de mi ciclo</button>
           <button className="btn ghost small" onClick={() => setShowNewCourse(!showNewCourse)}>+ Solicitar curso no listado</button>
@@ -2467,6 +2576,8 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
           </div>
         )}
       </Card>
+      </div>
+      <div data-tour="current-courses">
       <Card>
         <div className="section-title">
           <span>📚</span>
@@ -2488,6 +2599,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
           ))}
         </div>
       </Card>
+      </div>
     </div>
   )
 }
@@ -2591,6 +2703,7 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
         />
       )}
       {!guestMode && (
+        <div data-tour="calculator-course">
         <CourseCombo
           courses={courses}
           selectedCourseId={selectedCourseId}
@@ -2598,7 +2711,9 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
           onCreateCourse={onCreateCourse}
           activeCourse={activeCourse}
         />
+        </div>
       )}
+      <div data-tour="calculator-ocr">
       <Card className={`image-reader-card ${canUseImageReader ? '' : 'disabled-card'}`}>
         <div className="section-title"><span>📷</span><h3>Autocompletar desde una imagen</h3></div>
         <p className="hint">
@@ -2664,16 +2779,19 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
           <button className="btn primary small" disabled={!detectedGrades.length || ocrStatus === 'reading'} onClick={applyDetectedGrades}>Aplicar calificaciones</button>
         </div>
       </Card>
+      </div>
       {evaluationTemplate && <Card><p className="hint"><b>Método de evaluación:</b> {evaluationTemplate.name} · <b>Nota mínima:</b> {formatNumber(evaluationTemplate.min_passing_grade || settings.minimum_grade)}</p></Card>}
-      {groups.map((group) => (
-        <EvaluationSection key={group} title={group} items={items.filter((item) => item.group === group)} grades={grades} settings={settings} updateGrade={updateGrade} flexible />
-      ))}
-      <div className="action-row">
+      <div data-tour="calculator-grades">
+        {groups.map((group) => (
+          <EvaluationSection key={group} title={group} items={items.filter((item) => item.group === group)} grades={grades} settings={settings} updateGrade={updateGrade} flexible />
+        ))}
+      </div>
+      <div className="action-row" data-tour="calculator-actions">
         <button className="btn primary" onClick={onCalculate}>🧮 Calcular</button>
         <button className="btn warning" onClick={onClean}>🧹 Limpiar</button>
         <button className="btn success" onClick={onGenerate}>✨ Generar</button>
       </div>
-      {onSave && <button className="btn secondary full" onClick={onSave}>💾 Guardar resultado</button>}
+      {onSave && <button className="btn secondary full" data-tour="calculator-save" onClick={onSave}>💾 Guardar resultado</button>}
       {result && <ResultCard result={result} />}
     </div>
   )

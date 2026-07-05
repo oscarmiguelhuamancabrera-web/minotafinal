@@ -146,3 +146,21 @@
 
 - Muestra 1: UPSJB.
 - Muestra 2: UAI.
+
+## REQ-008 — Visita guiada responsive para el primer ingreso
+
+**Estado:** Implementado en rama de desarrollo, pendiente de validar en preview
+
+**Flujo:**
+
+- El tutorial inicial lleva a la sección Cursos, no directamente a la calculadora.
+- La guía explica filtro de ciclo, selección y agregado de cursos.
+- Continúa por Mis cursos, selector de calculadora, OCR, calificaciones, cálculo y guardado.
+- Incluye controles Atrás, Siguiente, Finalizar y Omitir.
+- `has_seen_tutorial` se actualiza únicamente al finalizar u omitir.
+
+**Compatibilidad:**
+
+- En computadora se muestra una tarjeta junto al elemento resaltado.
+- En celular se muestra como tarjeta inferior para no cubrir el contenido principal.
+- Recalcula su posición al hacer scroll, cambiar el tamaño o rotar la pantalla.
