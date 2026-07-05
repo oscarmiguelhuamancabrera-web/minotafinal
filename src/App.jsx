@@ -1617,6 +1617,12 @@ function App() {
     if (!session?.user) return
     const email = session.user.email || profile?.email || ''
     const nextRole = profile?.role || (email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'superadmin' : 'student')
+    const cycleChanged = Boolean(
+      !isAdminRole(nextRole) &&
+      profile?.current_cycle_id &&
+      values.cycleId &&
+      profile.current_cycle_id !== values.cycleId
+    )
 
     if (!values.firstName?.trim() || !values.lastName?.trim()) {
       notify('error', 'Completa nombres y apellidos.')
@@ -1644,6 +1650,22 @@ function App() {
     const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' })
     if (error) notify('error', getErrorMessage(error))
     else {
+      if (cycleChanged) {
+        const now = new Date().toISOString()
+        const { error: clearCoursesError } = await supabase
+          .from('student_courses')
+          .update({ status: 'hidden', hidden_at: now, updated_at: now })
+          .eq('user_id', session.user.id)
+          .eq('status', 'visible')
+
+        if (clearCoursesError) {
+          notify('error', `El ciclo cambió, pero no se pudieron limpiar los cursos anteriores: ${getErrorMessage(clearCoursesError)}`)
+        } else {
+          setSelectedCourseId('')
+          setGrades(emptyGrades())
+          setResult(null)
+        }
+      }
       notify('success', 'Perfil actualizado correctamente.')
       await recordUsageEvent('profile_updated', { university_id: values.universityId, faculty_id: values.facultyId, career_id: values.careerId, cycle_id: values.cycleId })
       await loadProfileAndData(session.user)
@@ -1664,7 +1686,7 @@ function App() {
       supabase.from('evaluation_templates').select('*, university:universities(name,code), faculty:faculties(name), career:careers(name), course:courses(name)').order('created_at', { ascending: false }),
       supabase.from('evaluation_components').select('*').order('component_order'),
       supabase.from('app_usage_events').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), course:courses(name)').order('created_at', { ascending: false }).limit(1000),
-      supabase.from('course_requests').select('*, requester:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500),
+      supabase.from('course_requests').select('*, requester:profiles!course_requests_requested_by_fkey(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500),
       supabase.from('announcements').select('*, creator:profiles(first_name,last_name,email), university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name), cycle:cycles(id,name,order_number)').order('created_at', { ascending: false }).limit(500),
       // Se carga sin joins embebidos para evitar errores PGRST201 cuando existen varias relaciones con profiles.
       supabase.from('user_suggestions').select('*').order('created_at', { ascending: false }).limit(800)
@@ -1706,6 +1728,7 @@ function App() {
       components: componentsRes.data || [],
       usageEvents: usageRes.data || [],
       courseRequests: requestsRes.data || [],
+      courseRequestsError: requestsRes.error ? getErrorMessage(requestsRes.error) : '',
       announcements: announcementsRes.data || [],
       suggestions: suggestionRows,
       suggestionsError: suggestionsRes.error ? getErrorMessage(suggestionsRes.error) : ''
@@ -2302,7 +2325,6 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   const [name, setName] = useState('')
 
   const filteredAvailable = (availableCourses || []).filter((course) => !cycleId || course.cycle_id === cycleId)
-  const filteredCurrentCourses = (courses || []).filter((course) => !cycleId || course.cycle_id === cycleId)
   const selectedAvailable = filteredAvailable.find((course) => course.id === courseId)
 
   async function addSelectedCourse() {
@@ -2379,9 +2401,9 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
           <span>📚</span>
           <h3>Mis cursos actuales</h3>
         </div>
-        {filteredCurrentCourses.length === 0 && <Empty text="Aún no agregaste cursos para el ciclo seleccionado." compact />}
+        {courses.length === 0 && <Empty text="Aún no agregaste cursos." compact />}
         <div className="course-list">
-          {filteredCurrentCourses.map((course) => (
+          {courses.map((course) => (
             <div key={course.id} className="student-course-card">
               <div>
                 <h3>{course.name}</h3>
@@ -3163,7 +3185,7 @@ function AdminDashboard({ data, onLoad, setScreen }) {
       </Card>
       <Card>
         <h3>Solicitudes de cursos no listados</h3>
-        <CourseRequestsSummary items={data?.courseRequests || []} />
+        <CourseRequestsSummary items={data?.courseRequests || []} error={data?.courseRequestsError} />
       </Card>
       <div className="grid three">
         <button className="btn secondary" onClick={() => setScreen('admin-users')}>👥 Gestionar usuarios</button>
@@ -3503,7 +3525,8 @@ function AdminEvaluations({ data, onLoad, onCreateTemplate, onUpdateTemplate, on
   )
 }
 
-function CourseRequestsSummary({ items = [] }) {
+function CourseRequestsSummary({ items = [], error = '' }) {
+  if (error) return <p className="hint warning-hint">No se pudieron cargar las solicitudes: {error}</p>
   const pending = items.filter((item) => item.status === 'pending').slice(0, 8)
   if (!pending.length) return <Empty text="No hay solicitudes pendientes de cursos." compact />
   return (
