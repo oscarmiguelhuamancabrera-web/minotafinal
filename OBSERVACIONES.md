@@ -128,3 +128,21 @@
 - Corrige confusiones visuales frecuentes como `FKI` → `FK1` y `ul` → `U1`.
 - Distingue el porcentaje de la nota.
 - FK1/FK2 de tercera unidad y U3 permanecen pendientes.
+
+## REQ-007 — Perfiles OCR separados por universidad
+
+**Estado:** Pendiente de estructuración
+
+**Regla de diseño:**
+
+- Tesseract.js seguirá siendo el motor común para reconocer texto.
+- Cada universidad tendrá un perfil de interpretación independiente.
+- UPSJB usará códigos como PC1–PC4, EP y EF, excluyendo PF, PP y ER.
+- UAI usará componentes por unidad como FK1_1, FK2_1, U1, FK1_2, FK2_2 y U2.
+- La aplicación elegirá el perfil mediante la universidad del curso o de la plantilla seleccionada.
+- Las reglas y correcciones de una universidad no deben alterar los resultados de otra.
+
+**Muestras asociadas:**
+
+- Muestra 1: UPSJB.
+- Muestra 2: UAI.
