@@ -206,6 +206,34 @@ function normalizeCourseName(value = '') {
     .replace(/[^a-z0-9\s]/g, '')
 }
 
+function courseNamePresentationScore(name = '') {
+  const letters = String(name).match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []
+  if (!letters.length) return 0
+  const uppercaseLetters = letters.filter((letter) => letter === letter.toUpperCase()).length
+  return uppercaseLetters === letters.length ? 0 : 1
+}
+
+function deduplicateCourses(courseList = []) {
+  const uniqueCourses = new Map()
+
+  for (const course of courseList || []) {
+    const key = [
+      course.university_id || '',
+      course.faculty_id || '',
+      course.career_id || '',
+      course.cycle_id || '',
+      normalizeCourseName(course.name)
+    ].join('|')
+    const current = uniqueCourses.get(key)
+
+    if (!current || courseNamePresentationScore(course.name) > courseNamePresentationScore(current.name)) {
+      uniqueCourses.set(key, course)
+    }
+  }
+
+  return [...uniqueCourses.values()]
+}
+
 function findSimilarCourses(name = '', courseList = []) {
   const query = normalizeCourseName(name)
   if (!query || query.length < 3) return []
@@ -1028,7 +1056,7 @@ function App() {
       return
     }
 
-    const officialCourses = officialRes.data || []
+    const officialCourses = deduplicateCourses(officialRes.data || [])
     const orderedOfficial = officialCourses.sort((a, b) => {
       const cycleDiff = Number(a.cycle?.order_number || 0) - Number(b.cycle?.order_number || 0)
       return cycleDiff || String(a.name).localeCompare(String(b.name), 'es')
