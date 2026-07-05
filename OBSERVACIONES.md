@@ -91,3 +91,24 @@
 - El botón de agregado masivo usa siempre `current_cycle_id` del perfil del estudiante.
 - Cambiar el combo a otro ciclo no cambia el ciclo usado por el agregado masivo.
 - El botón queda deshabilitado si el perfil no tiene ciclo o si no existen cursos para su ciclo habilitado.
+
+## REQ-006 — Autocompletar calificaciones desde una imagen
+
+**Estado:** Implementado en rama de desarrollo, pendiente de validar con capturas reales de notas
+
+**Resultado implementado:**
+
+- El estudiante selecciona un curso o plantilla antes de usar el lector.
+- Puede cargar una captura o fotografía de hasta 10 MB.
+- La imagen se procesa localmente en el navegador con Tesseract.js.
+- Se mejora contraste y resolución antes del reconocimiento.
+- Las calificaciones detectadas se muestran en campos editables.
+- Solo se aplican a la calculadora después de la confirmación del estudiante.
+- Se validan valores entre 0 y 20.
+- Existe un modo manual para revisar o pegar el texto cuando el OCR no sea suficiente.
+
+**Validación pendiente:**
+
+- Probar con capturas reales de cada universidad soportada.
+- Ampliar alias cuando una plataforma use nombres diferentes para las evaluaciones.
+- Medir precisión, tiempo de lectura y consumo de memoria en celulares.

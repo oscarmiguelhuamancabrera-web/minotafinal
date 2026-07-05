@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createWorker } from 'tesseract.js'
 import { supabase } from './lib/supabase'
 import {
   DEFAULT_SETTINGS,
@@ -224,6 +225,142 @@ function eventLabel(type) {
     template_selected: 'Plantilla seleccionada'
   }
   return labels[type] || type || 'Evento'
+}
+
+function normalizeForMatching(value = '') {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function parseGradeText(text = '', items = []) {
+  const normalizedItems = (items || []).map((item) => ({
+    ...item,
+    token: normalizeForMatching(`${item.key || ''} ${item.label || ''} ${item.name || ''}`)
+  }))
+  const aliases = [
+    ['pc1', 'pc 1', 'practica 1', 'practica calificada 1', 'práctica calificada 1'],
+    ['pc2', 'pc 2', 'practica 2', 'practica calificada 2', 'práctica calificada 2'],
+    ['pc3', 'pc 3', 'practica 3', 'practica calificada 3', 'práctica calificada 3'],
+    ['pc4', 'pc 4', 'practica 4', 'practica calificada 4', 'práctica calificada 4'],
+    ['ep', 'examen parcial', 'parcial'],
+    ['ef', 'examen final', 'final']
+  ]
+  const lines = String(text || '')
+    .split(/\n+/)
+    .map((line) => cleanText(line))
+    .filter(Boolean)
+
+  function findItem(line) {
+    const normalizedLine = normalizeForMatching(line)
+    const aliasGroup = aliases.find((group) => group.some((alias) => normalizedLine.includes(normalizeForMatching(alias))))
+    if (aliasGroup) {
+      const match = normalizedItems.find((item) => aliasGroup.some((alias) => item.token.includes(normalizeForMatching(alias))))
+      if (match) return match
+    }
+    return normalizedItems.find((item) => {
+      const candidates = [item.key, item.label, item.name]
+        .map(normalizeForMatching)
+        .filter((candidate) => candidate.length >= 2)
+      return candidates.some((candidate) => normalizedLine.includes(candidate))
+    }) || null
+  }
+
+  const detected = new Map()
+  lines.forEach((line) => {
+    const normalizedLine = normalizeForMatching(line)
+    if (/\b(pf|pp)\b/.test(normalizedLine) || normalizedLine.includes('promedio final')) return
+    if (/\ber\b/.test(normalizedLine) || normalizedLine.includes('examen rezagado')) return
+    const item = findItem(line)
+    if (!item) return
+    const values = (line.match(/\b(?:20(?:[.,]0+)?|1?\d(?:[.,]\d{1,2})?)\b/g) || [])
+      .map(toNumber)
+      .filter((value) => value !== null && value >= 0 && value <= 20)
+    const score = values.length ? values[values.length - 1] : null
+    const previous = detected.get(item.key)
+    if (!previous || (previous.score === null && score !== null)) {
+      detected.set(item.key, {
+        key: item.key,
+        label: item.label || item.name || item.key,
+        score,
+        sourceLine: line
+      })
+    }
+  })
+
+  return Array.from(detected.values())
+}
+
+let ocrWorkerPromise = null
+let ocrProgressListener = null
+
+async function getOcrWorker(onProgress) {
+  ocrProgressListener = onProgress
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = createWorker(['spa', 'eng'], 1, {
+      logger: (message) => {
+        if (message?.status === 'recognizing text' && typeof message.progress === 'number') {
+          ocrProgressListener?.(Math.round(message.progress * 100))
+        }
+      }
+    }).then(async (worker) => {
+      await worker.setParameters({
+        preserve_interword_spaces: '1',
+        user_defined_dpi: '300'
+      })
+      return worker
+    }).catch((error) => {
+      ocrWorkerPromise = null
+      throw error
+    })
+  }
+  return ocrWorkerPromise
+}
+
+function prepareImageForOcr(file) {
+  return new Promise((resolve, reject) => {
+    const sourceUrl = URL.createObjectURL(file)
+    const image = new Image()
+    image.onerror = () => {
+      URL.revokeObjectURL(sourceUrl)
+      reject(new Error('No se pudo procesar la imagen seleccionada.'))
+    }
+    image.onload = () => {
+      const upscale = Math.max(1, Math.min(3, 1800 / image.width))
+      const scale = Math.min(upscale, 2800 / Math.max(image.width, image.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.width * scale))
+      canvas.height = Math.max(1, Math.round(image.height * scale))
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+      for (let index = 0; index < pixels.data.length; index += 4) {
+        const gray = (pixels.data[index] * 0.299) + (pixels.data[index + 1] * 0.587) + (pixels.data[index + 2] * 0.114)
+        const contrasted = Math.max(0, Math.min(255, ((gray - 128) * 1.35) + 128))
+        pixels.data[index] = contrasted
+        pixels.data[index + 1] = contrasted
+        pixels.data[index + 2] = contrasted
+      }
+      context.putImageData(pixels, 0, 0)
+      URL.revokeObjectURL(sourceUrl)
+      resolve(canvas)
+    }
+    image.src = sourceUrl
+  })
+}
+
+async function readImageText(file, onProgress) {
+  const image = await prepareImageForOcr(file)
+  const worker = await getOcrWorker(onProgress)
+  const { data } = await worker.recognize(image)
+  return {
+    text: String(data?.text || '').trim(),
+    confidence: Math.round(Number(data?.confidence || 0))
+  }
 }
 
 function isWithinPeriod(value, period = 'today') {
@@ -1976,6 +2113,10 @@ function App() {
                 evaluationTemplates={evaluationTemplates}
                 onSelectTemplate={applyEvaluationTemplate}
                 allowTemplateSelection
+                onExtractedGrades={(nextGrades) => {
+                  setGrades((previous) => ({ ...previous, ...nextGrades }))
+                  setResult(null)
+                }}
               />
             )}
             {guestMode && screen === 'guest-settings' && (
@@ -2016,6 +2157,10 @@ function App() {
                 evaluationTemplates={templatesForCurrentCalculator()}
                 onSelectTemplate={applyEvaluationTemplate}
                 allowTemplateSelection={isAdmin}
+                onExtractedGrades={(nextGrades) => {
+                  setGrades((previous) => ({ ...previous, ...nextGrades }))
+                  setResult(null)
+                }}
               />
             )}
             {session && screen === 'history' && <HistoryScreen history={history} />}
@@ -2422,10 +2567,92 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   )
 }
 
-function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate, allowTemplateSelection = false }) {
+function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate, allowTemplateSelection = false, onExtractedGrades }) {
   const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
   const groups = [...new Set(items.map((item) => item.group || 'Evaluaciones'))]
   const updateGrade = (key, value) => setGrades((prev) => ({ ...prev, [key]: value }))
+  const canUseImageReader = guestMode ? Boolean(evaluationTemplate?.id) : Boolean(selectedCourseId || activeCourse?.id)
+  const [imagePreview, setImagePreview] = useState('')
+  const [imageName, setImageName] = useState('')
+  const [ocrText, setOcrText] = useState('')
+  const [ocrStatus, setOcrStatus] = useState('idle')
+  const [ocrProgress, setOcrProgress] = useState(0)
+  const [ocrConfidence, setOcrConfidence] = useState(0)
+  const [ocrError, setOcrError] = useState('')
+  const [showManualOcr, setShowManualOcr] = useState(false)
+  const [detectedGrades, setDetectedGrades] = useState([])
+
+  useEffect(() => () => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+  }, [imagePreview])
+
+  async function handleImageChange(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!file.type?.startsWith('image/')) {
+      setOcrError('Selecciona una imagen válida.')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setOcrError('La imagen no debe superar los 10 MB.')
+      return
+    }
+
+    setImageName(file.name)
+    setImagePreview(URL.createObjectURL(file))
+    setDetectedGrades([])
+    setOcrText('')
+    setOcrError('')
+    setOcrProgress(0)
+    setOcrConfidence(0)
+    setOcrStatus('reading')
+    setShowManualOcr(false)
+
+    try {
+      const recognized = await readImageText(file, setOcrProgress)
+      setOcrText(recognized.text)
+      setOcrConfidence(recognized.confidence)
+      const detected = parseGradeText(recognized.text, items)
+      setDetectedGrades(detected)
+      if (detected.some((row) => row.score !== null)) {
+        setOcrStatus('done')
+      } else {
+        setOcrStatus('empty')
+        setOcrError('Se leyó la imagen, pero no se encontraron calificaciones compatibles. Prueba una captura más clara o usa el modo manual.')
+      }
+    } catch (error) {
+      setOcrStatus('error')
+      setOcrError(error?.message || 'No se pudo leer la imagen. Puedes usar el modo manual.')
+      setShowManualOcr(true)
+    }
+  }
+
+  function analyzeGradeText() {
+    const detected = parseGradeText(ocrText, items)
+    setDetectedGrades(detected)
+    setOcrStatus(detected.some((row) => row.score !== null) ? 'done' : 'empty')
+    setOcrError(detected.length ? '' : 'No se detectaron calificaciones compatibles en el texto.')
+  }
+
+  function updateDetectedGrade(key, value) {
+    setDetectedGrades((current) => current.map((row) => row.key === key ? { ...row, score: value } : row))
+  }
+
+  function applyDetectedGrades() {
+    const nextGrades = {}
+    detectedGrades.forEach((row) => {
+      const value = toNumber(row.score)
+      if (value !== null && value >= 0 && value <= 20) nextGrades[row.key] = formatNumber(value)
+    })
+    if (!Object.keys(nextGrades).length) {
+      setOcrError('Revisa las calificaciones: deben ser valores entre 0 y 20.')
+      return
+    }
+    onExtractedGrades?.(nextGrades)
+    setOcrError('')
+    setOcrStatus('applied')
+  }
 
   return (
     <div className="page fade-in">
@@ -2447,6 +2674,69 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
           activeCourse={activeCourse}
         />
       )}
+      <Card className={`image-reader-card ${canUseImageReader ? '' : 'disabled-card'}`}>
+        <div className="section-title"><span>📷</span><h3>Autocompletar desde una imagen</h3></div>
+        <p className="hint">
+          {canUseImageReader
+            ? 'Sube una captura de tus notas. La imagen se procesa en este dispositivo y podrás revisar cada valor antes de aplicarlo.'
+            : guestMode
+              ? 'Selecciona una plantilla de evaluación antes de cargar la imagen.'
+              : 'Selecciona un curso antes de cargar la imagen.'}
+        </p>
+        <div className="image-reader-layout">
+          <label className={`file-drop ${canUseImageReader ? '' : 'disabled'}`}>
+            <input type="file" accept="image/*" disabled={!canUseImageReader || ocrStatus === 'reading'} onChange={handleImageChange} />
+            <span>{imageName || 'Tomar foto o seleccionar captura'}</span>
+            <small>Formatos de imagen, máximo 10 MB.</small>
+          </label>
+          {imagePreview && <img className="image-preview" src={imagePreview} alt="Vista previa de las calificaciones" />}
+        </div>
+        {ocrStatus === 'reading' && (
+          <div className="ocr-status" aria-live="polite">
+            <b>Reconociendo texto…</b>
+            <div className="progress-bar"><span style={{ width: `${Math.max(5, ocrProgress)}%` }} /></div>
+            <small>{ocrProgress ? `${ocrProgress}%` : 'Preparando el lector'}</small>
+          </div>
+        )}
+        {(ocrStatus === 'done' || ocrStatus === 'applied') && (
+          <p className="hint success-hint">
+            {ocrStatus === 'applied' ? 'Calificaciones aplicadas a la calculadora.' : `Lectura terminada${ocrConfidence ? ` · Confianza general ${ocrConfidence}%` : ''}. Revisa los valores.`}
+          </p>
+        )}
+        {ocrError && <p className="hint warning-hint">{ocrError}</p>}
+        {detectedGrades.length > 0 && (
+          <div className="detected-grade-grid">
+            {detectedGrades.map((row) => (
+              <label key={row.key}>
+                <span>{row.label}</span>
+                <input
+                  className="input grade"
+                  inputMode="decimal"
+                  placeholder="Pendiente"
+                  value={row.score ?? ''}
+                  onChange={(event) => updateDetectedGrade(row.key, event.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+        )}
+        <button type="button" className="link-button" disabled={!canUseImageReader || ocrStatus === 'reading'} onClick={() => setShowManualOcr((value) => !value)}>
+          {showManualOcr ? 'Ocultar texto reconocido' : 'Revisar o pegar texto manualmente'}
+        </button>
+        {showManualOcr && (
+          <textarea
+            className="input text-area"
+            disabled={!canUseImageReader || ocrStatus === 'reading'}
+            placeholder={'Ejemplo:\nPC1 16\nPC2 14\nExamen parcial 15'}
+            value={ocrText}
+            onChange={(event) => setOcrText(event.target.value)}
+          />
+        )}
+        <div className="action-row left">
+          {showManualOcr && <button className="btn secondary small" disabled={!ocrText.trim()} onClick={analyzeGradeText}>Detectar en el texto</button>}
+          <button className="btn primary small" disabled={!detectedGrades.length || ocrStatus === 'reading'} onClick={applyDetectedGrades}>Aplicar calificaciones</button>
+        </div>
+      </Card>
       {evaluationTemplate && <Card><p className="hint"><b>Método de evaluación:</b> {evaluationTemplate.name} · <b>Nota mínima:</b> {formatNumber(evaluationTemplate.min_passing_grade || settings.minimum_grade)}</p></Card>}
       {groups.map((group) => (
         <EvaluationSection key={group} title={group} items={items.filter((item) => item.group === group)} grades={grades} settings={settings} updateGrade={updateGrade} flexible />
