@@ -627,8 +627,13 @@ function App() {
 
   useEffect(() => {
     initialize()
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       setSession(newSession)
+
+      // Supabase renueva el token periódicamente para mantener la sesión activa.
+      // No es necesario recargar perfil, cursos e historial en cada renovación.
+      if (event === 'TOKEN_REFRESHED') return
+
       setGuestMode(false)
       if (newSession?.user) {
         await loadProfileAndData(newSession.user)

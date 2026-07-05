@@ -6,7 +6,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // Una versión nueva se aplicará al volver a abrir la app, sin recargar
+      // automáticamente la pantalla mientras el usuario está trabajando.
+      registerType: 'prompt',
       includeAssets: ['favicon.png', 'logo.png', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'Mi Nota Final',
