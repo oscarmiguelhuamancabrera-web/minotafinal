@@ -78,3 +78,16 @@
 - Se debe desactivar la confirmación obligatoria de correo en la configuración de Supabase Auth.
 - El frontend debe reemplazar el mensaje actual por una confirmación simple de cuenta creada.
 - Quitar únicamente el mensaje no es suficiente: mientras Supabase exija confirmación, el inicio de sesión inmediato será rechazado.
+
+## REQ-005 — Agregar masivamente solo los cursos del ciclo del perfil
+
+**Estado:** Implementado, pendiente de validación en preview
+
+**Observación:** El botón “Agregar todos los cursos del ciclo” no debe usar el ciclo elegido en el combo de filtro.
+
+**Resultado esperado:**
+
+- El combo de ciclo continúa filtrando las opciones para agregar cursos individualmente.
+- El botón de agregado masivo usa siempre `current_cycle_id` del perfil del estudiante.
+- Cambiar el combo a otro ciclo no cambia el ciclo usado por el agregado masivo.
+- El botón queda deshabilitado si el perfil no tiene ciclo o si no existen cursos para su ciclo habilitado.

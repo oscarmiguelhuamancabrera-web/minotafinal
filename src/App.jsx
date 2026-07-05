@@ -1516,13 +1516,14 @@ function App() {
     return data
   }
 
-  async function handleAddAllStudentCourses(cycleId, enrollmentType = 'regular') {
+  async function handleAddAllStudentCourses(enrollmentType = 'regular') {
     if (!session?.user) {
       notify('error', 'Inicia sesión para agregar cursos.')
       return null
     }
+    const cycleId = profile?.current_cycle_id
     if (!cycleId) {
-      notify('error', 'Selecciona un ciclo para agregar sus cursos.')
+      notify('error', 'Completa el ciclo actual de tu perfil antes de agregar cursos.')
       return null
     }
 
@@ -2324,6 +2325,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   const [name, setName] = useState('')
 
   const filteredAvailable = (availableCourses || []).filter((course) => !cycleId || course.cycle_id === cycleId)
+  const profileCycleCourses = (availableCourses || []).filter((course) => course.cycle_id === profile?.current_cycle_id)
   const selectedAvailable = filteredAvailable.find((course) => course.id === courseId)
 
   async function addSelectedCourse() {
@@ -2374,7 +2376,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
         )}
         <div className="action-row left">
           <button className="btn primary small" disabled={!courseId} onClick={addSelectedCourse}>➕ Agregar a Mis cursos</button>
-          <button className="btn secondary small" disabled={!cycleId || filteredAvailable.length === 0} onClick={() => onAddAll(cycleId, enrollmentType)}>📚 Agregar todos los cursos del ciclo</button>
+          <button className="btn secondary small" disabled={!profile?.current_cycle_id || profileCycleCourses.length === 0} onClick={() => onAddAll(enrollmentType)}>📚 Agregar todos los cursos de mi ciclo</button>
           <button className="btn ghost small" onClick={() => setShowNewCourse(!showNewCourse)}>+ Solicitar curso no listado</button>
         </div>
         {showNewCourse && (
