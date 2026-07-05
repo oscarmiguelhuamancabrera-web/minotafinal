@@ -453,6 +453,122 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   }
 }
 
+/* Visita guiada de primer uso */
+.guided-tour-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1900;
+  pointer-events: none;
+  background: rgba(17, 24, 39, 0.58);
+  backdrop-filter: blur(1px);
+}
+
+.guided-tour-target {
+  position: relative !important;
+  z-index: 1950 !important;
+  border-radius: 16px;
+  outline: 4px solid #fbbf24;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 8px rgba(251, 191, 36, 0.22), 0 18px 50px rgba(17, 24, 39, 0.28);
+}
+
+.guided-tour-card {
+  position: fixed;
+  z-index: 2000;
+  max-width: calc(100vw - 32px);
+  padding: 20px;
+  border: 1px solid rgba(126, 58, 242, 0.25);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(17, 24, 39, 0.32);
+}
+
+.guided-tour-card h2 {
+  margin: 14px 0 8px;
+  color: #4c1d95;
+  font-size: 1.35rem;
+}
+
+.guided-tour-card p {
+  margin: 0;
+  color: #5f5375;
+  line-height: 1.5;
+}
+
+.guided-tour-card small {
+  display: block;
+  margin-top: 8px;
+  color: #92400e;
+}
+
+.guided-tour-progress {
+  display: grid;
+  gap: 7px;
+  color: #6d28d9;
+  font-size: .82rem;
+  font-weight: 900;
+}
+
+.guided-tour-progress > div {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #ede9fe;
+}
+
+.guided-tour-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7c3aed, #c084fc);
+  transition: width .2s ease;
+}
+
+.guided-tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.guided-tour-actions > div {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .guided-tour-card.mobile {
+    left: 10px;
+    right: 10px;
+    bottom: calc(82px + env(safe-area-inset-bottom));
+    width: auto;
+    max-width: none;
+    padding: 17px;
+    border-radius: 20px;
+  }
+
+  .guided-tour-card h2 {
+    font-size: 1.18rem;
+  }
+
+  .guided-tour-card p {
+    font-size: .94rem;
+  }
+
+  .guided-tour-actions {
+    align-items: stretch;
+  }
+
+  .guided-tour-actions > div {
+    flex: 1;
+  }
+
+  .guided-tour-actions > div .btn {
+    flex: 1;
+  }
+}
+
 /* Ajustes v1.0.3 */
 .toast.info { border-color: #bfdbfe; color: #1d4ed8; }
 .social-button {
