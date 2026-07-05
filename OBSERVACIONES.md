@@ -60,3 +60,21 @@
 
 - Requiere actualizar la función trigger `public.handle_new_user()` mediante una migración.
 - Puede requerir completar perfiles existentes cuyos campos `university_id` o `faculty_id` hayan quedado nulos.
+
+## REQ-004 — Registro sin confirmación por correo
+
+**Estado:** Frontend implementado; pendiente desactivar confirmación en Supabase Auth
+
+**Observación:** Después de crear una cuenta no debe mostrarse ningún mensaje solicitando revisar o confirmar el correo.
+
+**Resultado esperado:**
+
+- Al finalizar el registro, la aplicación debe volver directamente al inicio de sesión normal.
+- El usuario debe poder iniciar sesión inmediatamente con el correo y la contraseña registrados.
+- No debe mostrarse texto sobre confirmación, spam o correo no deseado.
+
+**Impacto en Supabase:**
+
+- Se debe desactivar la confirmación obligatoria de correo en la configuración de Supabase Auth.
+- El frontend debe reemplazar el mensaje actual por una confirmación simple de cuenta creada.
+- Quitar únicamente el mensaje no es suficiente: mientras Supabase exija confirmación, el inicio de sesión inmediato será rechazado.

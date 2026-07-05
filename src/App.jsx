@@ -437,7 +437,7 @@ function getErrorMessage(error) {
   const message = error?.message || ''
   const lower = message.toLowerCase()
   if (lower.includes('email not confirmed') || lower.includes('not confirmed') || lower.includes('confirm')) {
-    return 'Tu cuenta aún no está confirmada. Revisa tu correo electrónico para confirmar tu cuenta. También revisa spam o correo no deseado.'
+    return 'No se pudo iniciar sesión porque la cuenta todavía no está habilitada.'
   }
   if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
     return 'No se pudo iniciar sesión. El correo no está registrado o la contraseña es incorrecta.'
@@ -1127,7 +1127,7 @@ function App() {
       return
     }
 
-    notify('success', 'Cuenta creada correctamente. Revisa tu correo electrónico para confirmar tu cuenta antes de iniciar sesión. También revisa spam o correo no deseado.')
+    notify('success', 'Cuenta creada correctamente. Ya puedes iniciar sesión.')
     setScreen('login')
   }
 
@@ -2140,7 +2140,6 @@ function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }
         <button className="btn link" onClick={onRegister}>Crear cuenta nueva</button>
       </div>
       <button className="btn ghost full" onClick={onGuest}>Continuar como invitado</button>
-      <p className="hint">Si acabas de registrarte, confirma tu correo antes de iniciar sesión. Revisa también spam o correo no deseado.</p>
     </AuthCard>
   )
 }
