@@ -112,3 +112,11 @@
 - Probar con capturas reales de cada universidad soportada.
 - Ampliar alias cuando una plataforma use nombres diferentes para las evaluaciones.
 - Medir precisión, tiempo de lectura y consumo de memoria en celulares.
+
+**Muestra validada 1 — UPSJB:**
+
+- Confianza OCR obtenida: 87%.
+- Detecta PC1 `11.67`, PC2 `12.33`, PC3 `17.50` y parcial `20.00`.
+- Ignora promedio final `16.00`, promedio `15.73` y examen rezagado.
+- PC4 y examen final permanecen pendientes.
+- Se prioriza la última nota válida cuando la captura contiene bloques duplicados.

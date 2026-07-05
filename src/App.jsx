@@ -282,7 +282,9 @@ function parseGradeText(text = '', items = []) {
       .filter((value) => value !== null && value >= 0 && value <= 20)
     const score = values.length ? values[values.length - 1] : null
     const previous = detected.get(item.key)
-    if (!previous || (previous.score === null && score !== null)) {
+    // En capturas largas puede aparecer primero un resumen de otro curso y
+    // después la tabla vigente. Conservamos la última nota válida detectada.
+    if (!previous || score !== null || previous.score === null) {
       detected.set(item.key, {
         key: item.key,
         label: item.label || item.name || item.key,
@@ -309,6 +311,7 @@ async function getOcrWorker(onProgress) {
       }
     }).then(async (worker) => {
       await worker.setParameters({
+        tessedit_pageseg_mode: '3',
         preserve_interword_spaces: '1',
         user_defined_dpi: '300'
       })
@@ -335,17 +338,8 @@ function prepareImageForOcr(file) {
       const canvas = document.createElement('canvas')
       canvas.width = Math.max(1, Math.round(image.width * scale))
       canvas.height = Math.max(1, Math.round(image.height * scale))
-      const context = canvas.getContext('2d', { willReadFrequently: true })
+      const context = canvas.getContext('2d')
       context.drawImage(image, 0, 0, canvas.width, canvas.height)
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
-      for (let index = 0; index < pixels.data.length; index += 4) {
-        const gray = (pixels.data[index] * 0.299) + (pixels.data[index + 1] * 0.587) + (pixels.data[index + 2] * 0.114)
-        const contrasted = Math.max(0, Math.min(255, ((gray - 128) * 1.35) + 128))
-        pixels.data[index] = contrasted
-        pixels.data[index + 1] = contrasted
-        pixels.data[index + 2] = contrasted
-      }
-      context.putImageData(pixels, 0, 0)
       URL.revokeObjectURL(sourceUrl)
       resolve(canvas)
     }
