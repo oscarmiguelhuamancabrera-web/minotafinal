@@ -18,7 +18,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.2.2'
+const APP_VERSION = '1.1.8-fix-modal'
 
 const emptyAuth = {
   firstName: '',
@@ -44,6 +44,41 @@ function timeOnly(value) {
 function dateOnly(value) {
   if (!value) return '—'
   return new Date(value).toLocaleDateString('es-PE')
+}
+
+
+function daysSince(value) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const diff = Date.now() - date.getTime()
+  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
+}
+
+function formatLastSeen(value) {
+  if (!value) return 'Sin registro'
+  return `${dateOnly(value)} ${timeOnly(value)}`
+}
+
+function inactivityLabel(value) {
+  const days = daysSince(value)
+  if (days === null) return 'Sin actividad'
+  if (days === 0) return 'Hoy'
+  if (days === 1) return '1 día'
+  return `${days} días`
+}
+
+function safeMaxDate(...values) {
+  const valid = values
+    .filter(Boolean)
+    .map((value) => new Date(value))
+    .filter((date) => !Number.isNaN(date.getTime()))
+  if (!valid.length) return null
+  return new Date(Math.max(...valid.map((date) => date.getTime()))).toISOString()
+}
+
+function shouldAutoNavigateFrom(screen) {
+  return !screen || ['login', 'complete-profile', 'tutorial'].includes(screen)
 }
 
 function firstWord(value) {
@@ -179,9 +214,9 @@ function findSimilarCourses(name = '', courseList = []) {
 function eventLabel(type) {
   const labels = {
     course_added: 'Curso agregado',
+    course_bulk_added: 'Cursos agregados masivamente',
     course_hidden: 'Curso ocultado',
     course_requested: 'Curso solicitado',
-    courses_bulk_added: 'Cursos agregados masivamente',
     calculation_done: 'Cálculo realizado',
     result_saved: 'Resultado guardado',
     settings_updated: 'Ajustes modificados',
@@ -189,103 +224,6 @@ function eventLabel(type) {
     template_selected: 'Plantilla seleccionada'
   }
   return labels[type] || type || 'Evento'
-}
-
-
-function normalizeForMatching(value = '') {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9ñ\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function daysSince(value) {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  const diff = Date.now() - date.getTime()
-  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
-}
-
-function latestDate(a, b) {
-  if (!a) return b || null
-  if (!b) return a || null
-  return new Date(a) > new Date(b) ? a : b
-}
-
-function parseGradeText(text = '', items = []) {
-  const detected = []
-  const ignored = []
-  const normalizedItems = (items || []).map((item) => ({
-    ...item,
-    token: normalizeForMatching(`${item.label || ''} ${item.name || ''}`)
-  }))
-  const lines = String(text || '')
-    .split(/\n+/)
-    .map((line) => cleanText(line))
-    .filter(Boolean)
-
-  const aliases = [
-    { code: 'PC1', keys: ['pc1', 'practica calificada 1', 'práctica calificada 1'] },
-    { code: 'PC2', keys: ['pc2', 'practica calificada 2', 'práctica calificada 2'] },
-    { code: 'PC3', keys: ['pc3', 'practica calificada 3', 'práctica calificada 3'] },
-    { code: 'PC4', keys: ['pc4', 'practica calificada 4', 'práctica calificada 4'] },
-    { code: 'EP', keys: ['ep', 'examen parcial', 'parcial'] },
-    { code: 'EF', keys: ['ef', 'examen final', 'final'] }
-  ]
-
-  const matchItemForLine = (lineNorm) => {
-    for (const alias of aliases) {
-      if (alias.keys.some((key) => lineNorm.includes(normalizeForMatching(key)))) {
-        const found = normalizedItems.find((item) => {
-          const itemNorm = item.token
-          return alias.keys.some((key) => itemNorm.includes(normalizeForMatching(key))) ||
-            (alias.code === 'EP' && (itemNorm.includes('parcial') || itemNorm.includes('ep'))) ||
-            (alias.code === 'EF' && (itemNorm.includes('final') || itemNorm.includes('ef')))
-        })
-        if (found) return found
-      }
-    }
-    return normalizedItems.find((item) => item.token && lineNorm.includes(item.token)) || null
-  }
-
-  for (const line of lines) {
-    const norm = normalizeForMatching(line)
-    if (!norm) continue
-    if (/\b(pf|pp)\b/.test(norm) || norm.includes('promedio final') || norm === 'promedio') {
-      ignored.push({ line, reason: 'Promedio referencial' })
-      continue
-    }
-    if (/\ber\b/.test(norm) || norm.includes('examen rezagado')) {
-      ignored.push({ line, reason: 'Examen rezagado opcional' })
-      continue
-    }
-    const item = matchItemForLine(norm)
-    if (!item) continue
-    const numbers = line.match(/\b(?:20(?:[.,]00?)?|1?\d(?:[.,]\d{1,2})?)\b/g) || []
-    const numericValues = numbers
-      .map((value) => toNumber(value))
-      .filter((value) => value !== null && value >= 0 && value <= 20)
-    const score = numericValues.length ? numericValues[numericValues.length - 1] : null
-    detected.push({
-      key: item.key,
-      label: item.label,
-      name: item.name,
-      score,
-      pending: score === null,
-      line
-    })
-  }
-
-  const byKey = new Map()
-  for (const row of detected) {
-    const existing = byKey.get(row.key)
-    if (!existing || (existing.score === null && row.score !== null)) byKey.set(row.key, row)
-  }
-  return { detected: Array.from(byKey.values()), ignored }
 }
 
 function isWithinPeriod(value, period = 'today') {
@@ -316,6 +254,109 @@ function formatStatus(status) {
   return status || '—'
 }
 
+function formatSuggestionStatus(status) {
+  const labels = {
+    pending: 'Pendiente',
+    reviewing: 'En revisión',
+    resolved: 'Resuelto',
+    rejected: 'Rechazado'
+  }
+  return labels[status] || status || 'Pendiente'
+}
+
+function formatAnnouncementType(type) {
+  const labels = {
+    update: 'Nueva actualización',
+    important: 'Aviso importante',
+    maintenance: 'Mantenimiento',
+    reminder: 'Recordatorio',
+    info: 'Informativo'
+  }
+  return labels[type] || type || 'Informativo'
+}
+
+function formatDisplayMode(mode) {
+  const labels = {
+    banner: 'Banner',
+    modal: 'Ventana flotante',
+    card: 'Tarjeta'
+  }
+  return labels[mode] || mode || 'Tarjeta'
+}
+
+function formatRepeatMode(mode) {
+  const labels = {
+    once: 'Una vez por usuario',
+    daily: 'Una vez al día',
+    always: 'Cada vez que ingresa'
+  }
+  return labels[mode] || labels.once
+}
+
+function shouldShowFloatingAnnouncement(announcement, closedIds = []) {
+  if (!announcement || announcement.display_mode !== 'modal') return false
+  if (closedIds.includes(announcement.id)) return false
+  const repeatMode = announcement.repeat_mode || 'once'
+  if (repeatMode === 'always') return true
+  const dismissedAt = announcement.read?.dismissed_at
+  if (!dismissedAt) return true
+  if (repeatMode === 'daily') {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const dismissedDate = new Date(dismissedAt)
+    return dismissedDate < today
+  }
+  return false
+}
+
+function fileToAnnouncementImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve('')
+    if (!file.type?.startsWith('image/')) return reject(new Error('Selecciona una imagen válida.'))
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'))
+    reader.onload = () => {
+      const image = new Image()
+      image.onerror = () => reject(new Error('No se pudo procesar la imagen.'))
+      image.onload = () => {
+        const maxWidth = 900
+        const scale = Math.min(1, maxWidth / image.width)
+        const width = Math.max(1, Math.round(image.width * scale))
+        const height = Math.max(1, Math.round(image.height * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(image, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', 0.82))
+      }
+      image.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function announcementPriorityWeight(priority) {
+  if (priority === 'high') return 3
+  if (priority === 'normal') return 2
+  return 1
+}
+
+function matchesAnnouncementTarget(announcement, userProfile) {
+  if (!announcement || !userProfile) return false
+  const now = new Date()
+  const startsAt = announcement.starts_at ? new Date(announcement.starts_at) : null
+  const endsAt = announcement.ends_at ? new Date(announcement.ends_at) : null
+  if (startsAt && startsAt > now) return false
+  if (endsAt && endsAt < now) return false
+  if (announcement.target_role && announcement.target_role !== 'all' && announcement.target_role !== userProfile.role) return false
+  if (announcement.university_id && announcement.university_id !== userProfile.university_id) return false
+  if (announcement.faculty_id && announcement.faculty_id !== userProfile.faculty_id) return false
+  if (announcement.career_id && announcement.career_id !== userProfile.career_id) return false
+  if (announcement.cycle_id && announcement.cycle_id !== userProfile.current_cycle_id) return false
+  return true
+}
+
 function formatRole(role) {
   if (role === 'superadmin') return 'Superadmin'
   if (role === 'admin') return 'Administrador'
@@ -332,48 +373,6 @@ function formatEnrollmentType(type) {
     otro: 'Otro'
   }
   return labels[type] || 'Regular'
-}
-
-
-function loadTesseractScript() {
-  if (typeof window === 'undefined') return Promise.reject(new Error('OCR no disponible fuera del navegador.'))
-  if (window.Tesseract) return Promise.resolve(window.Tesseract)
-  if (window.__miNotaFinalTesseractPromise) return window.__miNotaFinalTesseractPromise
-
-  window.__miNotaFinalTesseractPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-mnf-tesseract="true"]')
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.Tesseract))
-      existing.addEventListener('error', () => reject(new Error('No se pudo cargar el lector OCR.')))
-      return
-    }
-
-    const script = document.createElement('script')
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
-    script.async = true
-    script.defer = true
-    script.dataset.mnfTesseract = 'true'
-    script.onload = () => {
-      if (window.Tesseract) resolve(window.Tesseract)
-      else reject(new Error('El lector OCR no se cargó correctamente.'))
-    }
-    script.onerror = () => reject(new Error('No se pudo cargar el lector OCR. Revisa tu conexión.'))
-    document.head.appendChild(script)
-  })
-
-  return window.__miNotaFinalTesseractPromise
-}
-
-async function readImageText(file, onProgress) {
-  const Tesseract = await loadTesseractScript()
-  const result = await Tesseract.recognize(file, 'spa+eng', {
-    logger: (message) => {
-      if (message?.status === 'recognizing text' && typeof message.progress === 'number') {
-        onProgress?.(Math.round(message.progress * 100))
-      }
-    }
-  })
-  return cleanText(result?.data?.text || '')
 }
 
 function creatorName(course) {
@@ -470,15 +469,30 @@ function App() {
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
   const [adminData, setAdminData] = useState(null)
+  const [announcements, setAnnouncements] = useState([])
+  const [suggestions, setSuggestions] = useState([])
+  const [closedModalIds, setClosedModalIds] = useState([])
   const [screen, setScreen] = useState('login')
   const [guestMode, setGuestMode] = useState(false)
   const [notice, setNotice] = useState(null)
   const [loading, setLoading] = useState(true)
   const recordedLoginRef = useRef('')
+  const screenRef = useRef(screen)
+
+  useEffect(() => {
+    screenRef.current = screen
+  }, [screen])
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin'
   const activeCourse = courses.find((course) => course.id === selectedCourseId) || null
   const greetingName = firstWord(profile?.first_name || profile?.full_name)
+
+  useEffect(() => {
+    if (!session?.user?.id || !profile?.id || screen !== 'communication') return
+    if (isAdmin) loadAdminData()
+    else loadUserCommunication(profile)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, profile?.id, isAdmin])
 
   function findBestTemplateForContext(context = {}, course = null, templates = evaluationTemplates) {
     const candidates = (templates || []).filter((template) => {
@@ -666,14 +680,6 @@ function App() {
     return role === 'admin' || role === 'superadmin'
   }
 
-  function redirectToDefaultWhenNeeded(target) {
-    setScreen((previous) => {
-      const transientScreens = ['login', 'welcome', 'register', 'complete-profile', 'tutorial']
-      if (!previous || transientScreens.includes(previous)) return target
-      return previous
-    })
-  }
-
   async function loadProfileAndData(user) {
     const { data: userProfile, error } = await supabase
       .from('profiles')
@@ -718,7 +724,7 @@ function App() {
         setProfile(nextAdminProfile)
         await loadSettings(user.id)
         await loadAdminData()
-        redirectToDefaultWhenNeeded('admin-dashboard')
+        if (shouldAutoNavigateFrom(screenRef.current)) setScreen('admin-dashboard')
         return
       }
 
@@ -752,34 +758,64 @@ function App() {
       }).eq('id', userProfile.id)
     }
 
-    setProfile(normalizedProfile)
+    const fixedName = normalizeProfileNameFields(normalizedProfile)
+    const normalizedNameProfile = {
+      ...normalizedProfile,
+      first_name: fixedName.firstName || normalizedProfile.first_name,
+      last_name: fixedName.lastName || normalizedProfile.last_name,
+      full_name: `${fixedName.firstName || normalizedProfile.first_name || ''} ${fixedName.lastName || normalizedProfile.last_name || ''}`.trim()
+    }
 
-    if (isProfileIncomplete(normalizedProfile)) {
+    if (
+      normalizedNameProfile.first_name !== userProfile.first_name ||
+      normalizedNameProfile.last_name !== userProfile.last_name ||
+      normalizedNameProfile.full_name !== userProfile.full_name
+    ) {
+      await supabase.from('profiles').update({
+        first_name: normalizedNameProfile.first_name,
+        last_name: normalizedNameProfile.last_name,
+        full_name: normalizedNameProfile.full_name,
+        updated_at: new Date().toISOString()
+      }).eq('id', userProfile.id)
+    }
+
+    setProfile(normalizedNameProfile)
+
+    if (isProfileIncomplete(normalizedNameProfile)) {
       await loadSettings(user.id)
       setScreen('complete-profile')
       return
     }
 
-    await Promise.all([loadSettings(user.id), loadCourses(normalizedProfile), loadHistory(user.id)])
+    // Admin/superadmin: cargar siempre la data administrativa al iniciar sesión o refrescar.
+    // Antes, si el perfil admin ya existía, las sugerencias podían guardarse en BD
+    // pero no aparecer en el panel del superadmin hasta otra recarga/cambio interno.
+    if (isAdminRole(normalizedNameProfile.role)) {
+      await loadSettings(user.id)
+      await loadAdminData()
+    } else {
+      await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id)])
+      await loadUserCommunication(normalizedNameProfile)
 
-    if (!isAdminRole(normalizedProfile.role)) {
       const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
-      const defaultTemplate = findBestTemplateForContext(normalizedProfile, null, templates)
+      const defaultTemplate = findBestTemplateForContext(normalizedNameProfile, null, templates)
       if (defaultTemplate?.id) await applyEvaluationTemplate(defaultTemplate.id)
     }
 
     const key = `${user.id}-${todayISO()}`
     if (recordedLoginRef.current !== key) {
       recordedLoginRef.current = key
-      recordLoginActivity(normalizedProfile)
+      recordLoginActivity(normalizedNameProfile)
     }
 
-    if (!isAdminRole(normalizedProfile.role) && normalizedProfile.has_seen_tutorial === false) {
+    if (!isAdminRole(normalizedNameProfile.role) && normalizedNameProfile.has_seen_tutorial === false) {
       setScreen('tutorial')
       return
     }
 
-    redirectToDefaultWhenNeeded(isAdminRole(normalizedProfile.role) ? 'admin-dashboard' : 'dashboard')
+    if (shouldAutoNavigateFrom(screenRef.current)) {
+      setScreen(isAdminRole(normalizedNameProfile.role) ? 'admin-dashboard' : 'dashboard')
+    }
   }
 
   async function recordLoginActivity(userProfile) {
@@ -808,6 +844,81 @@ function App() {
       course_id: metadata.course_id || null,
       metadata
     })
+  }
+
+
+  async function loadUserCommunication(userProfile = profile) {
+    if (!userProfile?.id || isAdminRole(userProfile.role)) {
+      setAnnouncements([])
+      setSuggestions([])
+      return
+    }
+
+    const [announcementsRes, readsRes, suggestionsRes] = await Promise.all([
+      supabase.from('announcements').select('*').eq('status', 'active').order('priority', { ascending: false }).order('created_at', { ascending: false }).limit(50),
+      supabase.from('announcement_reads').select('*').eq('user_id', userProfile.id),
+      // Consulta simple sin joins embebidos: evita fallas por relaciones ambiguas con profiles
+      // y asegura que el alumno vea admin_response, responded_at y el nuevo estado.
+      supabase.from('user_suggestions').select('*').eq('user_id', userProfile.id).order('updated_at', { ascending: false }).order('created_at', { ascending: false }).limit(50)
+    ])
+
+    if (announcementsRes.error) {
+      setAnnouncements([])
+    } else {
+      const readMap = new Map((readsRes.data || []).map((row) => [row.announcement_id, row]))
+      const visible = (announcementsRes.data || [])
+        .filter((item) => matchesAnnouncementTarget(item, userProfile))
+        .map((item) => ({ ...item, read: readMap.get(item.id) || null }))
+        .sort((a, b) => announcementPriorityWeight(b.priority) - announcementPriorityWeight(a.priority) || new Date(b.created_at) - new Date(a.created_at))
+      setAnnouncements(visible)
+    }
+
+    if (suggestionsRes.error) {
+      console.error('No se pudieron cargar las sugerencias del usuario:', suggestionsRes.error)
+      setSuggestions([])
+    } else {
+      setSuggestions(suggestionsRes.data || [])
+    }
+  }
+
+  async function dismissAnnouncement(announcementId) {
+    if (!session?.user?.id || !announcementId) return
+    const { error } = await supabase.from('announcement_reads').upsert({
+      announcement_id: announcementId,
+      user_id: session.user.id,
+      seen_at: new Date().toISOString(),
+      dismissed_at: new Date().toISOString()
+    }, { onConflict: 'announcement_id,user_id' })
+    if (error) notify('error', getErrorMessage(error))
+    else await loadUserCommunication(profile)
+  }
+
+  async function submitSuggestion(payload) {
+    if (!session?.user?.id || !profile?.id) return false
+    if (!payload.subject?.trim() || !payload.message?.trim()) {
+      notify('error', 'Completa el asunto y el mensaje.')
+      return false
+    }
+    const { error } = await supabase.from('user_suggestions').insert({
+      user_id: session.user.id,
+      type: payload.type || 'suggestion',
+      subject: payload.subject.trim(),
+      message: payload.message.trim(),
+      status: 'pending',
+      university_id: profile.university_id || null,
+      faculty_id: profile.faculty_id || null,
+      career_id: profile.career_id || null,
+      cycle_id: profile.current_cycle_id || null
+    })
+    if (error) {
+      notify('error', getErrorMessage(error))
+      return false
+    }
+    notify('success', 'Tu reporte fue enviado al administrador.')
+    await recordUsageEvent('suggestion_submitted', { type: payload.type })
+    await loadUserCommunication(profile)
+    if (adminData) await loadAdminData()
+    return true
   }
 
   async function loadSettings(userId = session?.user?.id) {
@@ -1400,43 +1511,46 @@ function App() {
     }
     if (!options.silent) notify('success', 'Curso agregado a Mis cursos actuales.')
     await recordUsageEvent('course_added', { course_id: courseId, cycle_id: selectedCourse.cycle_id || null, enrollment_type: enrollmentType })
-    if (!options.skipReload) await loadCourses()
+    await loadCourses()
     if (options.select) await loadCourseGrades(courseId)
     return data
   }
 
-
-  async function handleAddAllStudentCourses(courseIds = [], enrollmentType = 'regular') {
+  async function handleAddAllStudentCourses(cycleId, enrollmentType = 'regular') {
     if (!session?.user) {
       notify('error', 'Inicia sesión para agregar cursos.')
-      return
+      return null
     }
-    const uniqueIds = [...new Set(courseIds)].filter(Boolean)
-    if (!uniqueIds.length) {
-      notify('error', 'No hay cursos oficiales para agregar en este ciclo.')
-      return
-    }
-    const existingIds = new Set((courses || []).map((course) => course.id))
-    const targetCourses = uniqueIds
-      .filter((id) => !existingIds.has(id))
-      .map((id) => availableCourses.find((course) => course.id === id))
-      .filter(Boolean)
-
-    if (!targetCourses.length) {
-      notify('success', 'Todos los cursos de este ciclo ya estaban en tu lista.')
-      return
+    if (!cycleId) {
+      notify('error', 'Selecciona un ciclo para agregar sus cursos.')
+      return null
     }
 
-    const rows = targetCourses.map((course) => ({
+    const officialCourses = (availableCourses || []).filter((course) => course.cycle_id === cycleId && course.status === 'active')
+    if (!officialCourses.length) {
+      notify('error', 'No hay cursos oficiales cargados para este ciclo.')
+      return null
+    }
+
+    const currentIds = new Set((courses || []).filter((course) => course.cycle_id === cycleId).map((course) => course.id))
+    const missingCourses = officialCourses.filter((course) => !currentIds.has(course.id))
+
+    if (!missingCourses.length) {
+      notify('info', `Ya tienes agregados los ${officialCourses.length} cursos del ciclo seleccionado.`)
+      return { inserted: 0, existing: officialCourses.length }
+    }
+
+    const now = new Date().toISOString()
+    const rows = missingCourses.map((course) => ({
       user_id: session.user.id,
       course_id: course.id,
       university_id: course.university_id || profile?.university_id || null,
       faculty_id: course.faculty_id || profile?.faculty_id || null,
       career_id: course.career_id || profile?.career_id || null,
-      cycle_id: course.cycle_id || null,
+      cycle_id: course.cycle_id || cycleId,
       enrollment_type: enrollmentType || 'regular',
       status: 'visible',
-      updated_at: new Date().toISOString()
+      updated_at: now
     }))
 
     const { error } = await supabase
@@ -1444,18 +1558,19 @@ function App() {
       .upsert(rows, { onConflict: 'user_id,course_id' })
 
     if (error) {
-      notify('error', 'No se pudieron agregar todos los cursos. Verifica la migración de Mis cursos.')
-      return
+      notify('error', getErrorMessage(error))
+      return null
     }
 
-    await recordUsageEvent('courses_bulk_added', {
-      course_count: rows.length,
-      skipped_existing: uniqueIds.length - rows.length,
+    await recordUsageEvent('course_bulk_added', {
+      cycle_id: cycleId,
       enrollment_type: enrollmentType || 'regular',
-      cycle_id: rows[0]?.cycle_id || null
+      added_count: missingCourses.length,
+      already_count: officialCourses.length - missingCourses.length
     })
     await loadCourses()
-    notify('success', `Se agregaron ${rows.length} cursos. ${uniqueIds.length - rows.length} ya estaban en tu lista.`)
+    notify('success', `Se agregaron ${missingCourses.length} cursos. ${officialCourses.length - missingCourses.length} ya estaban en tu lista.`)
+    return { inserted: missingCourses.length, existing: officialCourses.length - missingCourses.length }
   }
 
   async function handleHideStudentCourse(course) {
@@ -1536,7 +1651,7 @@ function App() {
   }
 
   async function loadAdminData() {
-    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, careersRes, cyclesRes, templatesRes, componentsRes, usageRes, requestsRes] = await Promise.all([
+    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, careersRes, cyclesRes, templatesRes, componentsRes, usageRes, requestsRes, announcementsRes, suggestionsRes] = await Promise.all([
       supabase.from('profiles').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
       supabase.from('courses').select(COURSE_SELECT_ADMIN).order('created_at', { ascending: false }),
       supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), evaluation_template:evaluation_templates(name)').order('created_at', { ascending: false }).limit(300),
@@ -1549,23 +1664,51 @@ function App() {
       supabase.from('evaluation_templates').select('*, university:universities(name,code), faculty:faculties(name), career:careers(name), course:courses(name)').order('created_at', { ascending: false }),
       supabase.from('evaluation_components').select('*').order('component_order'),
       supabase.from('app_usage_events').select('*, profile:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), course:courses(name)').order('created_at', { ascending: false }).limit(1000),
-      supabase.from('course_requests').select('*, requester:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500)
+      supabase.from('course_requests').select('*, requester:profiles(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500),
+      supabase.from('announcements').select('*, creator:profiles(first_name,last_name,email), university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name), cycle:cycles(id,name,order_number)').order('created_at', { ascending: false }).limit(500),
+      // Se carga sin joins embebidos para evitar errores PGRST201 cuando existen varias relaciones con profiles.
+      supabase.from('user_suggestions').select('*').order('created_at', { ascending: false }).limit(800)
     ])
 
+    const profileRows = profilesRes.data || []
+    const universityRows = universitiesRes.data || []
+    const facultyRows = facultiesRes.data || []
+    const careerRows = careersRes.data || []
+    const cycleRows = cyclesRes.data || []
+
+    const profileMap = new Map(profileRows.map((item) => [item.id, item]))
+    const universityMap = new Map(universityRows.map((item) => [item.id, item]))
+    const facultyMap = new Map(facultyRows.map((item) => [item.id, item]))
+    const careerMap = new Map(careerRows.map((item) => [item.id, item]))
+    const cycleMap = new Map(cycleRows.map((item) => [item.id, item]))
+
+    const suggestionRows = (suggestionsRes.error ? [] : suggestionsRes.data || []).map((item) => ({
+      ...item,
+      user: profileMap.get(item.user_id) || null,
+      responder: profileMap.get(item.responded_by) || null,
+      university: universityMap.get(item.university_id) || profileMap.get(item.user_id)?.university || null,
+      faculty: facultyMap.get(item.faculty_id) || profileMap.get(item.user_id)?.faculty || null,
+      career: careerMap.get(item.career_id) || profileMap.get(item.user_id)?.career || null,
+      cycle: cycleMap.get(item.cycle_id) || profileMap.get(item.user_id)?.cycle || null
+    }))
+
     setAdminData({
-      users: profilesRes.data || [],
+      users: profileRows,
       courses: coursesRes.data || [],
       calculations: calculationsRes.data || [],
       logins: loginsRes.data || [],
       studentCourses: studentCoursesRes.data || [],
-      universities: universitiesRes.data || [],
-      faculties: facultiesRes.data || [],
-      careers: careersRes.data || [],
-      cycles: cyclesRes.data || [],
+      universities: universityRows,
+      faculties: facultyRows,
+      careers: careerRows,
+      cycles: cycleRows,
       templates: templatesRes.data || [],
       components: componentsRes.data || [],
       usageEvents: usageRes.data || [],
-      courseRequests: requestsRes.data || []
+      courseRequests: requestsRes.data || [],
+      announcements: announcementsRes.data || [],
+      suggestions: suggestionRows,
+      suggestionsError: suggestionsRes.error ? getErrorMessage(suggestionsRes.error) : ''
     })
   }
 
@@ -1652,6 +1795,77 @@ function App() {
     }
   }
 
+
+  async function createAnnouncement(payload) {
+    if (!payload.title?.trim() || !payload.summary?.trim()) {
+      notify('error', 'Completa título y resumen del anuncio.')
+      return false
+    }
+    const modalContentType = payload.displayMode === 'modal' ? (payload.modalContentType || 'text') : 'text'
+    if (payload.displayMode === 'modal' && modalContentType === 'image' && !payload.modalImageUrl) {
+      notify('error', 'Sube una imagen para la ventana flotante.')
+      return false
+    }
+    const { error } = await supabase.from('announcements').insert({
+      title: payload.title.trim(),
+      summary: payload.summary.trim(),
+      content: payload.content?.trim() || null,
+      type: payload.type || 'info',
+      display_mode: payload.displayMode || 'card',
+      modal_content_type: modalContentType,
+      modal_image_url: payload.displayMode === 'modal' && modalContentType === 'image' ? payload.modalImageUrl : null,
+      repeat_mode: payload.repeatMode || 'once',
+      priority: payload.priority || 'normal',
+      status: payload.status || 'active',
+      starts_at: payload.startsAt || null,
+      ends_at: payload.endsAt || null,
+      target_role: payload.targetRole || 'student',
+      university_id: payload.universityId || null,
+      faculty_id: payload.facultyId || null,
+      career_id: payload.careerId || null,
+      cycle_id: payload.cycleId || null,
+      created_by: profile?.id || null
+    })
+    if (error) {
+      notify('error', getErrorMessage(error))
+      return false
+    }
+    notify('success', 'Anuncio publicado correctamente.')
+    await loadAdminData()
+    return true
+  }
+
+  async function updateAnnouncement(announcementId, payload) {
+    const { error } = await supabase.from('announcements').update({
+      ...payload,
+      updated_at: new Date().toISOString()
+    }).eq('id', announcementId)
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Anuncio actualizado correctamente.')
+      await loadAdminData()
+    }
+  }
+
+  async function respondSuggestion(suggestionId, payload) {
+    if (!payload.adminResponse?.trim() && payload.status !== 'reviewing') {
+      notify('error', 'Escribe una respuesta para el usuario.')
+      return
+    }
+    const { error } = await supabase.from('user_suggestions').update({
+      status: payload.status || 'resolved',
+      admin_response: payload.adminResponse?.trim() || null,
+      responded_by: profile?.id || null,
+      responded_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).eq('id', suggestionId)
+    if (error) notify('error', getErrorMessage(error))
+    else {
+      notify('success', 'Respuesta enviada correctamente.')
+      await loadAdminData()
+    }
+  }
+
   const navItems = useMemo(() => {
     if (guestMode) return [
       ['guest-calculator', '🧮', 'Calcular'],
@@ -1664,16 +1878,29 @@ function App() {
       ['courses', '📚', 'Cursos'],
       ['calculator', '🧮', 'Calcular'],
       ['history', '📊', 'Historial'],
+      ['communication', '💬', 'Avisos'],
       ['more', '☰', 'Más']
     ]
     return base
   }, [session, guestMode])
+
+  const floatingAnnouncement = useMemo(
+    () => !isAdmin && !guestMode ? announcements.find((item) => shouldShowFloatingAnnouncement(item, closedModalIds)) : null,
+    [announcements, closedModalIds, isAdmin, guestMode]
+  )
+
+  async function closeFloatingAnnouncement(announcementId) {
+    if (!announcementId) return
+    setClosedModalIds((current) => current.includes(announcementId) ? current : [...current, announcementId])
+    await dismissAnnouncement(announcementId)
+  }
 
   if (loading) return <Splash />
 
   return (
     <div className="app-shell">
       {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
+      {floatingAnnouncement && <FloatingAnnouncementModal announcement={floatingAnnouncement} onClose={() => closeFloatingAnnouncement(floatingAnnouncement.id)} />}
       <main className="app-container">
         {!session && !guestMode && (screen === 'login' || screen === 'welcome') && (
           <Login
@@ -1725,7 +1952,6 @@ function App() {
                 evaluationTemplates={evaluationTemplates}
                 onSelectTemplate={applyEvaluationTemplate}
                 allowTemplateSelection
-                onExtractedGrades={(nextGrades) => { setGrades((prev) => ({ ...prev, ...nextGrades })); setResult(null) }}
               />
             )}
             {guestMode && screen === 'guest-settings' && (
@@ -1742,7 +1968,7 @@ function App() {
                 allowTemplateSelection
               />
             )}
-            {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
+            {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} announcements={announcements} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onAddAll={handleAddAllStudentCourses} onHide={handleHideStudentCourse} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
               <CalculatorScreen
@@ -1766,10 +1992,11 @@ function App() {
                 evaluationTemplates={templatesForCurrentCalculator()}
                 onSelectTemplate={applyEvaluationTemplate}
                 allowTemplateSelection={isAdmin}
-                onExtractedGrades={(nextGrades) => { setGrades((prev) => ({ ...prev, ...nextGrades })); setResult(null) }}
               />
             )}
             {session && screen === 'history' && <HistoryScreen history={history} />}
+            {session && !isAdmin && screen === 'communication' && <CommunicationCenter announcements={announcements} suggestions={suggestions} onDismissAnnouncement={dismissAnnouncement} onSubmitSuggestion={submitSuggestion} />}
+            {session && isAdmin && screen === 'communication' && <AdminCommunication data={adminData} profile={profile} onLoad={loadAdminData} onCreateAnnouncement={createAnnouncement} onUpdateAnnouncement={updateAnnouncement} onRespondSuggestion={respondSuggestion} />}
             {session && screen === 'settings' && (
               <SettingsScreen
                 settings={settings}
@@ -1792,6 +2019,7 @@ function App() {
             {session && isAdmin && screen === 'admin-courses' && <AdminCourses data={adminData} onLoad={loadAdminData} onUpdate={updateCourseAdmin} />}
             {session && isAdmin && screen === 'admin-calculations' && <AdminCalculations data={adminData} onLoad={loadAdminData} />}
             {session && isAdmin && screen === 'admin-evaluations' && <AdminEvaluations data={adminData} onLoad={loadAdminData} onCreateTemplate={createEvaluationTemplate} onUpdateTemplate={updateEvaluationTemplate} onCreateComponent={createEvaluationComponent} onUpdateComponent={updateEvaluationComponent} />}
+            {session && isAdmin && screen === 'admin-communication' && <AdminCommunication data={adminData} profile={profile} onLoad={loadAdminData} onCreateAnnouncement={createAnnouncement} onUpdateAnnouncement={updateAnnouncement} onRespondSuggestion={respondSuggestion} />}
           </AuthenticatedLayout>
         )}
       </main>
@@ -1970,13 +2198,14 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
           </div>
         </div>
         <nav className="desktop-nav">
-          {!guestMode && <button onClick={() => setScreen('dashboard')}>Inicio</button>}
-          {!guestMode && <button onClick={() => setScreen('courses')}>Cursos</button>}
-          <button onClick={() => setScreen(guestMode ? 'guest-calculator' : 'calculator')}>Calcular</button>
-          {!guestMode && <button onClick={() => setScreen('history')}>Historial</button>}
-          <button onClick={() => setScreen(guestMode ? 'guest-settings' : 'settings')}>Ajustes</button>
+          {!guestMode && <button className={screen === 'dashboard' ? 'active' : ''} onClick={() => setScreen('dashboard')}>Inicio</button>}
+          {!guestMode && <button className={screen === 'courses' ? 'active' : ''} onClick={() => setScreen('courses')}>Cursos</button>}
+          <button className={screen === 'calculator' || screen === 'guest-calculator' ? 'active' : ''} onClick={() => setScreen(guestMode ? 'guest-calculator' : 'calculator')}>Calcular</button>
+          {!guestMode && <button className={screen === 'history' ? 'active' : ''} onClick={() => setScreen('history')}>Historial</button>}
+          {!guestMode && <button className={screen === 'communication' ? 'active' : ''} onClick={() => setScreen('communication')}>{isAdmin ? 'Comunicación' : 'Avisos'}</button>}
+          <button className={screen === 'settings' || screen === 'guest-settings' ? 'active' : ''} onClick={() => setScreen(guestMode ? 'guest-settings' : 'settings')}>Ajustes</button>
           {isAdmin && <button className="admin-link" onClick={() => setScreen('admin-dashboard')}>Admin</button>}
-          <button onClick={() => setScreen('about')}>Acerca</button>
+          <button className={screen === 'about' ? 'active' : ''} onClick={() => setScreen('about')}>Acerca</button>
           <button onClick={onSignOut}>{guestMode ? 'Salir' : 'Cerrar sesión'}</button>
         </nav>
       </header>
@@ -1992,7 +2221,9 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
   )
 }
 
-function Dashboard({ profile, courses, history, setScreen, onSelectCourse }) {
+function Dashboard({ profile, courses, history, announcements = [], setScreen, onSelectCourse }) {
+  const visiblePageAnnouncements = announcements.filter((item) => item.display_mode !== 'modal' && !item.read?.dismissed_at)
+  const featuredAnnouncement = visiblePageAnnouncements.find((item) => item.display_mode === 'banner') || visiblePageAnnouncements[0]
   return (
     <div className="page fade-in">
       <div className="hero-panel">
@@ -2011,6 +2242,18 @@ function Dashboard({ profile, courses, history, setScreen, onSelectCourse }) {
         <StatCard icon="📊" label="Resultados guardados" value={history.length} />
         <StatCard icon="🏛️" label="Universidad" value={profile?.university?.code || '—'} />
       </div>
+      {featuredAnnouncement && (
+        <Card className={`announcement-card ${featuredAnnouncement.priority || 'normal'}`}>
+          <div className="list-row">
+            <div>
+              <span className="badge info">{formatAnnouncementType(featuredAnnouncement.type)}</span>
+              <h3>{featuredAnnouncement.title}</h3>
+              <p>{featuredAnnouncement.summary}</p>
+            </div>
+            <button className="btn secondary small" onClick={() => setScreen('communication')}>Ver novedades</button>
+          </div>
+        </Card>
+      )}
       <Card>
         <div className="section-title">
           <span>📌</span>
@@ -2041,9 +2284,10 @@ function Dashboard({ profile, courses, history, setScreen, onSelectCourse }) {
           </div>
         )}
       </Card>
-      <div className="grid two">
+      <div className="grid three">
         <ActionCard title="Mis cursos" text="Agrega cursos regulares, arrastrados, adelantados, electivos u otros." button="Ver cursos" onClick={() => setScreen('courses')} />
         <ActionCard title="Historial" text="Revisa los cálculos que decidiste guardar." button="Ver historial" onClick={() => setScreen('history')} />
+        <ActionCard title="Avisos y sugerencias" text="Revisa novedades, envía reportes y consulta respuestas del administrador." button="Ver avisos" onClick={() => setScreen('communication')} />
       </div>
       <Footer />
     </div>
@@ -2059,8 +2303,6 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
 
   const filteredAvailable = (availableCourses || []).filter((course) => !cycleId || course.cycle_id === cycleId)
   const filteredCurrentCourses = (courses || []).filter((course) => !cycleId || course.cycle_id === cycleId)
-  const currentCourseIds = new Set((courses || []).map((course) => course.id))
-  const missingAvailable = filteredAvailable.filter((course) => !currentCourseIds.has(course.id))
   const selectedAvailable = filteredAvailable.find((course) => course.id === courseId)
 
   async function addSelectedCourse() {
@@ -2070,11 +2312,6 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
       setCourseId('')
       setEnrollmentType('regular')
     }
-  }
-
-  async function addAllCoursesForCycle() {
-    if (!cycleId) return
-    await onAddAll?.(filteredAvailable.map((course) => course.id), enrollmentType || 'regular')
   }
 
   const similarCourses = findSimilarCourses(name, availableCourses)
@@ -2111,13 +2348,12 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
           </select>
         </div>
         {selectedAvailable && <p className="hint">Curso seleccionado: {selectedAvailable.name} · Creado por: {creatorName(selectedAvailable)}</p>}
-        {cycleId && filteredAvailable.length > 0 && <p className="hint">Cursos oficiales del ciclo: {filteredAvailable.length}. Faltan por agregar: {missingAvailable.length}.</p>}
         {filteredAvailable.length === 0 && (
           <p className="hint warning-hint">No hay cursos oficiales cargados para este contexto académico y ciclo. Puedes solicitar un curso no listado.</p>
         )}
         <div className="action-row left">
           <button className="btn primary small" disabled={!courseId} onClick={addSelectedCourse}>➕ Agregar a Mis cursos</button>
-          <button className="btn secondary small" disabled={!cycleId || missingAvailable.length === 0} onClick={addAllCoursesForCycle}>📚 Agregar todos los cursos del ciclo</button>
+          <button className="btn secondary small" disabled={!cycleId || filteredAvailable.length === 0} onClick={() => onAddAll(cycleId, enrollmentType)}>📚 Agregar todos los cursos del ciclo</button>
           <button className="btn ghost small" onClick={() => setShowNewCourse(!showNewCourse)}>+ Solicitar curso no listado</button>
         </div>
         {showNewCourse && (
@@ -2163,66 +2399,10 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   )
 }
 
-function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate, allowTemplateSelection = false, onExtractedGrades }) {
+function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate, allowTemplateSelection = false }) {
   const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
   const groups = [...new Set(items.map((item) => item.group || 'Evaluaciones'))]
   const updateGrade = (key, value) => setGrades((prev) => ({ ...prev, [key]: value }))
-  const selectedContextId = selectedCourseId || activeCourse?.id || ''
-  const canUseImageReader = guestMode ? Boolean(evaluationTemplate?.id) : Boolean(selectedContextId)
-  const [imagePreview, setImagePreview] = useState('')
-  const [imageName, setImageName] = useState('')
-  const [ocrText, setOcrText] = useState('')
-  const [ocrStatus, setOcrStatus] = useState('idle')
-  const [ocrProgress, setOcrProgress] = useState(0)
-  const [ocrError, setOcrError] = useState('')
-  const [showManualOcr, setShowManualOcr] = useState(false)
-  const [detectedGrades, setDetectedGrades] = useState([])
-
-  async function handleImageChange(event) {
-    const file = event.target.files?.[0]
-    if (!file) return
-    setImageName(file.name)
-    setImagePreview(URL.createObjectURL(file))
-    setDetectedGrades([])
-    setOcrText('')
-    setOcrError('')
-    setOcrProgress(0)
-    setOcrStatus('reading')
-    setShowManualOcr(false)
-
-    try {
-      const text = await readImageText(file, setOcrProgress)
-      setOcrText(text)
-      const parsed = parseGradeText(text, items)
-      setDetectedGrades(parsed.detected)
-      if (parsed.detected.length > 0) {
-        setOcrStatus('done')
-      } else {
-        setOcrStatus('empty')
-        setOcrError('Se leyó la imagen, pero no se encontraron notas compatibles. Usa el modo manual o prueba una captura más clara.')
-      }
-    } catch (error) {
-      setOcrStatus('error')
-      setOcrError(error?.message || 'No se pudo leer la imagen automáticamente. Puedes usar el modo manual.')
-      setShowManualOcr(true)
-    }
-  }
-
-  function analyzeGradeText() {
-    const parsed = parseGradeText(ocrText, items)
-    setDetectedGrades(parsed.detected)
-    setOcrStatus(parsed.detected.length > 0 ? 'done' : 'empty')
-    if (parsed.detected.length === 0) setOcrError('No se detectaron notas en el texto leído.')
-  }
-
-  function applyDetectedGrades() {
-    const next = {}
-    detectedGrades.forEach((row) => {
-      if (row.score !== null && row.score !== undefined) next[row.key] = formatNumber(row.score)
-    })
-    if (!Object.keys(next).length) return
-    onExtractedGrades?.(next)
-  }
 
   return (
     <div className="page fade-in">
@@ -2244,54 +2424,6 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
           activeCourse={activeCourse}
         />
       )}
-      <Card className={`image-reader-card ${canUseImageReader ? '' : 'disabled-card'}`}>
-        <div className="section-title"><span>📷</span><h3>Leer notas desde imagen</h3></div>
-        <p className="hint">
-          {canUseImageReader
-            ? 'Sube una captura de tus notas para autocompletar la calculadora. Antes de aplicar, revisa las notas detectadas.'
-            : guestMode
-              ? 'Selecciona una calculadora para cargar una captura de notas.'
-              : 'Selecciona un curso para cargar una captura de notas.'}
-        </p>
-        <div className="image-reader-layout">
-          <label className={`file-drop ${canUseImageReader ? '' : 'disabled'}`}>
-            <input type="file" accept="image/*" disabled={!canUseImageReader || ocrStatus === 'reading'} onChange={handleImageChange} />
-            <span>{imageName || 'Seleccionar captura de notas'}</span>
-            <small>{canUseImageReader ? 'La app intentará leer la imagen automáticamente.' : 'Primero selecciona curso o plantilla.'}</small>
-          </label>
-          {imagePreview && <img className="image-preview" src={imagePreview} alt="Vista previa de notas" />}
-        </div>
-        {ocrStatus === 'reading' && (
-          <div className="ocr-status">
-            <b>Leyendo imagen...</b>
-            <div className="progress-bar"><span style={{ width: `${Math.max(8, ocrProgress)}%` }} /></div>
-            <small>{ocrProgress > 0 ? `${ocrProgress}%` : 'Preparando OCR'}</small>
-          </div>
-        )}
-        {ocrStatus === 'done' && <p className="hint success-hint">Imagen leída. Revisa las notas detectadas antes de aplicarlas.</p>}
-        {ocrError && <p className="hint warning-hint">{ocrError}</p>}
-        <button type="button" className="link-button" disabled={!canUseImageReader} onClick={() => setShowManualOcr((value) => !value)}>
-          {showManualOcr ? 'Ocultar modo manual' : 'Usar modo manual avanzado'}
-        </button>
-        {showManualOcr && (
-          <textarea
-            className="input text-area"
-            disabled={!canUseImageReader || ocrStatus === 'reading'}
-            placeholder="Pega aquí el texto si el lector automático no reconoce la captura. Ejemplo: PC1 Práctica Calificada 1 17.67..."
-            value={ocrText}
-            onChange={(e) => setOcrText(e.target.value)}
-          />
-        )}
-        <div className="action-row left">
-          <button className="btn secondary small" disabled={!canUseImageReader || ocrStatus === 'reading' || !ocrText.trim()} onClick={analyzeGradeText}>Detectar notas</button>
-          <button className="btn primary small" disabled={!canUseImageReader || detectedGrades.filter((row) => row.score !== null).length === 0} onClick={applyDetectedGrades}>Aplicar a la calculadora</button>
-        </div>
-        {detectedGrades.length > 0 && (
-          <div className="detected-list">
-            {detectedGrades.map((row) => <span key={row.key}>{row.label}: <b>{row.score === null ? 'Pendiente' : formatNumber(row.score)}</b></span>)}
-          </div>
-        )}
-      </Card>
       {evaluationTemplate && <Card><p className="hint"><b>Método de evaluación:</b> {evaluationTemplate.name} · <b>Nota mínima:</b> {formatNumber(evaluationTemplate.min_passing_grade || settings.minimum_grade)}</p></Card>}
       {groups.map((group) => (
         <EvaluationSection key={group} title={group} items={items.filter((item) => item.group === group)} grades={grades} settings={settings} updateGrade={updateGrade} flexible />
@@ -2591,6 +2723,7 @@ function MoreScreen({ isAdmin, guestMode, setScreen, onSignOut }) {
       <div className="grid two">
         {!guestMode && <ActionCard title="Perfil" text="Datos personales, carrera y ciclo." button="Abrir" onClick={() => setScreen('profile')} />}
         <ActionCard title="Ajustes" text="Porcentajes y nota mínima." button="Abrir" onClick={() => setScreen(guestMode ? 'guest-settings' : 'settings')} />
+        {!guestMode && <ActionCard title={isAdmin ? 'Comunicación' : 'Avisos y sugerencias'} text={isAdmin ? 'Publica anuncios y responde reportes.' : 'Revisa novedades o envía una sugerencia.'} button="Abrir" onClick={() => setScreen('communication')} />}
         <ActionCard title="Acerca de" text="Versión y datos del sistema." button="Abrir" onClick={() => setScreen('about')} />
         {isAdmin && <ActionCard title="Panel administrador" text="Reportes, usuarios, cursos y cálculos." button="Abrir" onClick={() => setScreen('admin-dashboard')} />}
       </div>
@@ -2614,15 +2747,330 @@ function About() {
   )
 }
 
+
+function FloatingAnnouncementModal({ announcement, onClose }) {
+  const isImage = announcement?.modal_content_type === 'image' && announcement?.modal_image_url
+  return (
+    <div className="floating-announcement-backdrop" role="dialog" aria-modal="true">
+      <div className={`floating-announcement ${isImage ? 'image-mode' : 'text-mode'}`}>
+        <div className="floating-announcement-header">
+          <span>{formatAnnouncementType(announcement.type)}</span>
+          <button type="button" aria-label="Cerrar anuncio" onClick={onClose}>×</button>
+        </div>
+        {isImage ? (
+          <img className="floating-announcement-image" src={announcement.modal_image_url} alt={announcement.title} />
+        ) : (
+          <div className="floating-announcement-body">
+            <span className={`badge ${announcement.priority || 'normal'}`}>{announcement.priority === 'high' ? 'Importante' : 'Aviso'}</span>
+            <h2>{announcement.title}</h2>
+            <p>{announcement.summary}</p>
+            {announcement.content && <div className="floating-announcement-content">{announcement.content}</div>}
+            <button className="btn primary" onClick={onClose}>Entendido</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CommunicationCenter({ announcements = [], suggestions = [], onDismissAnnouncement, onSubmitSuggestion }) {
+  const [form, setForm] = useState({ type: 'suggestion', subject: '', message: '' })
+  const visibleAnnouncements = announcements.filter((item) => !item.read?.dismissed_at)
+
+  async function submit(e) {
+    e.preventDefault()
+    const ok = await onSubmitSuggestion(form)
+    if (ok) setForm({ type: 'suggestion', subject: '', message: '' })
+  }
+
+  return (
+    <div className="page fade-in">
+      <Header title="Avisos y sugerencias" subtitle="Revisa novedades del sistema y envía reportes al administrador." />
+      <div className="grid two">
+        <Card>
+          <h3>Novedades activas</h3>
+          {!visibleAnnouncements.length && <Empty text="No hay anuncios activos para tu perfil." compact />}
+          <div className="communication-list">
+            {visibleAnnouncements.map((item) => (
+              <div key={item.id} className={`announcement-card ${item.priority || 'normal'}`}>
+                <div className="list-row">
+                  <div>
+                    <span className="badge info">{formatAnnouncementType(item.type)}</span>
+                    <h3>{item.title}</h3>
+                    <p>{item.summary}</p>
+                    {item.content && <p className="hint">{item.content}</p>}
+                    {item.display_mode === 'modal' && item.modal_content_type === 'image' && item.modal_image_url && <img className="announcement-thumb" src={item.modal_image_url} alt={item.title} />}
+                    <p className="hint">Mostrar como: {formatDisplayMode(item.display_mode)} · Prioridad: {item.priority || 'normal'} · Frecuencia: {formatRepeatMode(item.repeat_mode)}</p>
+                  </div>
+                  <button className="btn ghost small" onClick={() => onDismissAnnouncement(item.id)}>Cerrar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card>
+          <h3>Enviar sugerencia o reporte</h3>
+          <form className="stack" onSubmit={submit}>
+            <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <option value="suggestion">Sugerencia de mejora</option>
+              <option value="bug">Error en la app</option>
+              <option value="missing_course">Falta un curso</option>
+              <option value="wrong_course">Curso mal escrito</option>
+              <option value="formula">Fórmula o porcentaje no coincide</option>
+              <option value="profile">Problema con mi perfil</option>
+              <option value="other">Otro</option>
+            </select>
+            <input className="input" placeholder="Asunto" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+            <textarea className="input textarea" placeholder="Describe el problema o sugerencia" rows="6" value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
+            <button className="btn primary">Enviar al administrador</button>
+          </form>
+        </Card>
+      </div>
+      <Card>
+        <h3>Mis reportes enviados</h3>
+        {!suggestions.length && <Empty text="Todavía no enviaste sugerencias o reportes." compact />}
+        <div className="admin-list admin-scroll-list">
+          {suggestions.map((item) => (
+            <Card key={item.id} className="nested-card">
+              <div className="list-row">
+                <div>
+                  <h3>{item.subject}</h3>
+                  <p>{item.message}</p>
+                  <p className="hint">Enviado: {dateOnly(item.created_at)} · Tipo: {item.type}</p>
+                </div>
+                <span className={`badge ${item.status}`}>{formatSuggestionStatus(item.status)}</span>
+              </div>
+              {item.admin_response ? (
+                <div className="response-box">
+                  <b>Respuesta del administrador</b>
+                  <p>{item.admin_response}</p>
+                  <span>{formatLastSeen(item.responded_at)} · Administrador</span>
+                </div>
+              ) : <p className="hint">Aún no hay respuesta del administrador.</p>}
+            </Card>
+          ))}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpdateAnnouncement, onRespondSuggestion }) {
+  useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const [tab, setTab] = useState('suggestions')
+  const [filters, setFilters] = useState({ status: '', q: '' })
+  const [announcement, setAnnouncement] = useState({
+    title: '', summary: '', content: '', type: 'update', displayMode: 'card', modalContentType: 'text', modalImageUrl: '', repeatMode: 'once', priority: 'normal', status: 'active',
+    startsAt: '', endsAt: '', targetRole: 'student', universityId: '', facultyId: '', careerId: '', cycleId: ''
+  })
+  const announcements = data?.announcements || []
+  const suggestions = data?.suggestions || []
+  const universities = data?.universities || []
+  const faculties = (data?.faculties || []).filter((item) => !announcement.universityId || item.university_id === announcement.universityId)
+  const careers = (data?.careers || []).filter((item) => !announcement.facultyId || item.faculty_id === announcement.facultyId)
+  const cycles = data?.cycles || []
+  const pending = suggestions.filter((item) => item.status === 'pending').length
+  const reviewing = suggestions.filter((item) => item.status === 'reviewing').length
+  const resolved = suggestions.filter((item) => item.status === 'resolved').length
+  const activeAnnouncements = announcements.filter((item) => item.status === 'active').length
+  const filteredSuggestions = suggestions.filter((item) => {
+    const text = `${item.subject} ${item.message} ${fullName(item.user)} ${item.user?.email || ''} ${item.university?.code || ''} ${item.career?.name || ''}`.toLowerCase()
+    return (!filters.status || item.status === filters.status) && text.includes(filters.q.toLowerCase())
+  })
+
+  async function saveAnnouncement(e) {
+    e.preventDefault()
+    const ok = await onCreateAnnouncement(announcement)
+    if (ok) setAnnouncement({
+      title: '', summary: '', content: '', type: 'update', displayMode: 'card', modalContentType: 'text', modalImageUrl: '', repeatMode: 'once', priority: 'normal', status: 'active',
+      startsAt: '', endsAt: '', targetRole: 'student', universityId: '', facultyId: '', careerId: '', cycleId: ''
+    })
+  }
+
+  async function handleAnnouncementImage(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const dataUrl = await fileToAnnouncementImage(file)
+      setAnnouncement((current) => ({ ...current, modalImageUrl: dataUrl }))
+    } catch (error) {
+      alert(error.message || 'No se pudo cargar la imagen.')
+    }
+  }
+
+  return (
+    <div className="page fade-in">
+      <Header title="Centro de comunicación" subtitle="Administra anuncios y responde sugerencias de los usuarios." />
+      {data?.suggestionsError && <div className="alert error">No se pudieron cargar las sugerencias: {data.suggestionsError}</div>}
+      <div className="cards stats-grid">
+        <StatCard icon="📣" label="Anuncios activos" value={activeAnnouncements} />
+        <StatCard icon="🕒" label="Pendientes" value={pending} />
+        <StatCard icon="👀" label="En revisión" value={reviewing} />
+        <StatCard icon="✅" label="Resueltos" value={resolved} />
+      </div>
+      <div className="action-row left">
+        <button className={`btn ${tab === 'suggestions' ? 'primary' : 'secondary'} small`} onClick={() => setTab('suggestions')}>Sugerencias</button>
+        <button className={`btn ${tab === 'announcements' ? 'primary' : 'secondary'} small`} onClick={() => setTab('announcements')}>Anuncios</button>
+      </div>
+
+      {tab === 'announcements' && (
+        <>
+          <Card>
+            <h3>Nuevo anuncio</h3>
+            <form className="stack" onSubmit={saveAnnouncement}>
+              <div className="grid three">
+                <input className="input" placeholder="Título" value={announcement.title} onChange={(e) => setAnnouncement({ ...announcement, title: e.target.value })} />
+                <select className="input" value={announcement.type} onChange={(e) => setAnnouncement({ ...announcement, type: e.target.value })}>
+                  <option value="update">Nueva actualización</option>
+                  <option value="important">Aviso importante</option>
+                  <option value="maintenance">Mantenimiento</option>
+                  <option value="reminder">Recordatorio</option>
+                  <option value="info">Informativo</option>
+                </select>
+                <select className="input" value={announcement.displayMode} onChange={(e) => setAnnouncement({ ...announcement, displayMode: e.target.value, modalContentType: e.target.value === 'modal' ? announcement.modalContentType : 'text' })}>
+                  <option value="card">Tarjeta en inicio</option>
+                  <option value="banner">Banner superior</option>
+                  <option value="modal">Ventana flotante</option>
+                </select>
+              </div>
+              <input className="input" placeholder="Resumen corto" value={announcement.summary} onChange={(e) => setAnnouncement({ ...announcement, summary: e.target.value })} />
+              <textarea className="input textarea" rows="4" placeholder="Contenido o detalle" value={announcement.content} onChange={(e) => setAnnouncement({ ...announcement, content: e.target.value })} />
+              {announcement.displayMode === 'modal' && (
+                <div className="modal-config-box">
+                  <div className="grid three">
+                    <select className="input" value={announcement.modalContentType} onChange={(e) => setAnnouncement({ ...announcement, modalContentType: e.target.value })}>
+                      <option value="text">Ventana con texto</option>
+                      <option value="image">Ventana con imagen</option>
+                    </select>
+                    <select className="input" value={announcement.repeatMode} onChange={(e) => setAnnouncement({ ...announcement, repeatMode: e.target.value })}>
+                      <option value="once">Mostrar una vez por usuario</option>
+                      <option value="daily">Mostrar una vez al día</option>
+                      <option value="always">Mostrar cada vez que ingresa</option>
+                    </select>
+                    {announcement.modalContentType === 'image' && <input className="input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleAnnouncementImage} />}
+                  </div>
+                  {announcement.modalContentType === 'image' && announcement.modalImageUrl && (
+                    <div className="modal-image-preview">
+                      <img src={announcement.modalImageUrl} alt="Vista previa del anuncio" />
+                      <button type="button" className="btn ghost small" onClick={() => setAnnouncement({ ...announcement, modalImageUrl: '' })}>Quitar imagen</button>
+                    </div>
+                  )}
+                  <p className="hint">La imagen solo se usará en la ventana flotante. Las tarjetas y banners seguirán mostrando texto.</p>
+                </div>
+              )}
+              <div className="grid three">
+                <select className="input" value={announcement.priority} onChange={(e) => setAnnouncement({ ...announcement, priority: e.target.value })}>
+                  <option value="low">Prioridad baja</option>
+                  <option value="normal">Prioridad normal</option>
+                  <option value="high">Prioridad alta</option>
+                </select>
+                <input className="input" type="datetime-local" value={announcement.startsAt} onChange={(e) => setAnnouncement({ ...announcement, startsAt: e.target.value })} />
+                <input className="input" type="datetime-local" value={announcement.endsAt} onChange={(e) => setAnnouncement({ ...announcement, endsAt: e.target.value })} />
+              </div>
+              <div className="grid three">
+                <select className="input" value={announcement.targetRole} onChange={(e) => setAnnouncement({ ...announcement, targetRole: e.target.value })}>
+                  <option value="student">Solo estudiantes</option>
+                  <option value="all">Todos</option>
+                  <option value="admin">Admins</option>
+                </select>
+                <select className="input" value={announcement.universityId} onChange={(e) => setAnnouncement({ ...announcement, universityId: e.target.value, facultyId: '', careerId: '' })}>
+                  <option value="">Todas las universidades</option>{universities.map((u) => <option key={u.id} value={u.id}>{u.code || u.name}</option>)}
+                </select>
+                <select className="input" value={announcement.facultyId} onChange={(e) => setAnnouncement({ ...announcement, facultyId: e.target.value, careerId: '' })}>
+                  <option value="">Todas las facultades</option>{faculties.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+                <select className="input" value={announcement.careerId} onChange={(e) => setAnnouncement({ ...announcement, careerId: e.target.value })}>
+                  <option value="">Todas las carreras</option>{careers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select className="input" value={announcement.cycleId} onChange={(e) => setAnnouncement({ ...announcement, cycleId: e.target.value })}>
+                  <option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <button className="btn primary">Publicar anuncio</button>
+            </form>
+          </Card>
+          <div className="admin-list admin-scroll-list">
+            {announcements.map((item) => (
+              <Card key={item.id}>
+                <div className="list-row">
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p>{item.summary}</p>
+                    {item.display_mode === 'modal' && item.modal_content_type === 'image' && item.modal_image_url && <img className="announcement-thumb" src={item.modal_image_url} alt={item.title} />}
+                    <p className="hint">{formatAnnouncementType(item.type)} · {formatDisplayMode(item.display_mode)} · {formatRepeatMode(item.repeat_mode)} · {item.university?.code || 'Todas'} · {item.career?.name || 'Todas las carreras'} · Creado: {dateOnly(item.created_at)}</p>
+                  </div>
+                  <span className={`badge ${item.status}`}>{formatStatus(item.status)}</span>
+                </div>
+                <div className="action-row left">
+                  <button className="btn ghost small" onClick={() => onUpdateAnnouncement(item.id, { status: item.status === 'active' ? 'inactive' : 'active' })}>{item.status === 'active' ? 'Inactivar' : 'Activar'}</button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+
+      {tab === 'suggestions' && (
+        <>
+          <div className="filters admin-course-filters">
+            <input className="input" placeholder="Buscar por usuario, correo, asunto o carrera" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+            <select className="input" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+              <option value="">Todos los estados</option>
+              <option value="pending">Pendiente</option>
+              <option value="reviewing">En revisión</option>
+              <option value="resolved">Resuelto</option>
+              <option value="rejected">Rechazado</option>
+            </select>
+          </div>
+          <div className="admin-list admin-scroll-list">
+            {!filteredSuggestions.length && <Empty text="No hay sugerencias con los filtros seleccionados." compact />}
+            {filteredSuggestions.map((item) => <SuggestionAdminCard key={item.id} item={item} onRespond={onRespondSuggestion} />)}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function SuggestionAdminCard({ item, onRespond }) {
+  const [response, setResponse] = useState(item.admin_response || '')
+  const [status, setStatus] = useState(item.status || 'resolved')
+  return (
+    <Card>
+      <div className="list-row">
+        <div>
+          <h3>{item.subject}</h3>
+          <p>{item.message}</p>
+          <p className="hint">{fullName(item.user)} · {item.user?.email || ''} · {item.university?.code || item.university?.name || 'Sin universidad'} · {item.career?.name || 'Sin carrera'} · {dateOnly(item.created_at)}</p>
+        </div>
+        <span className={`badge ${item.status}`}>{formatSuggestionStatus(item.status)}</span>
+      </div>
+      <div className="stack">
+        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="reviewing">En revisión</option>
+          <option value="resolved">Resuelto</option>
+          <option value="rejected">Rechazado</option>
+          <option value="pending">Pendiente</option>
+        </select>
+        <textarea className="input textarea" rows="4" placeholder="Respuesta para el usuario" value={response} onChange={(e) => setResponse(e.target.value)} />
+        <button className="btn primary small" onClick={() => onRespond(item.id, { status, adminResponse: response })}>Enviar respuesta</button>
+      </div>
+      {item.admin_response && <p className="hint">Última respuesta: {formatLastSeen(item.responded_at)} · {fullName(item.responder)}</p>}
+    </Card>
+  )
+}
+
 function AdminDashboard({ data, onLoad, setScreen }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState({ university: '', faculty: '', career: '', cycle: '', period: 'today' })
-  const users = data?.users || []
+  const allUsers = data?.users || []
+  const users = allUsers.filter((user) => !['admin', 'superadmin'].includes(user.role))
+  const studentUserIds = new Set(users.map((user) => user.id))
   const courses = data?.courses || []
-  const calculations = data?.calculations || []
-  const logins = data?.logins || []
+  const calculations = (data?.calculations || []).filter((item) => !item.user_id || studentUserIds.has(item.user_id))
+  const logins = (data?.logins || []).filter((item) => !item.user_id || studentUserIds.has(item.user_id))
   const studentCourses = data?.studentCourses || []
-  const usageEvents = (data?.usageEvents || []).filter((event) => isWithinPeriod(event.created_at, filters.period))
+  const usageEvents = (data?.usageEvents || []).filter((event) => (!event.user_id || studentUserIds.has(event.user_id)) && isWithinPeriod(event.created_at, filters.period))
   const periodLogins = logins.filter((login) => isWithinPeriod(login.login_at, filters.period))
   const todayLogins = logins.filter((login) => login.login_date === todayISO())
   const uniqueToday = new Set(todayLogins.map((login) => login.user_id)).size
@@ -2633,17 +3081,22 @@ function AdminDashboard({ data, onLoad, setScreen }) {
   const byCycle = countBy(users, (u) => u.cycle?.name || 'Sin ciclo')
   const byUsage = countBy(usageEvents, (event) => eventLabel(event.event_type))
 
-  const universities = unique([...users, ...courses].map((item) => item.university?.code || item.university?.name).filter(Boolean))
-  const faculties = unique([...users, ...courses]
-    .filter((item) => !filters.university || (item.university?.code || item.university?.name) === filters.university)
-    .map((item) => item.faculty?.name)
-    .filter(Boolean))
-  const careers = unique([...users, ...courses]
-    .filter((item) => !filters.university || (item.university?.code || item.university?.name) === filters.university)
-    .filter((item) => !filters.faculty || item.faculty?.name === filters.faculty)
-    .map((item) => item.career?.name)
-    .filter(Boolean))
-  const cycles = unique([...users, ...courses].map((item) => item.cycle?.name).filter(Boolean))
+  const universityRows = data?.universities || []
+  const facultyRows = data?.faculties || []
+  const careerRows = data?.careers || []
+  const cycleRows = data?.cycles || []
+  const universities = universityRows.map((item) => item.code || item.name).filter(Boolean)
+  const selectedUniversityId = universityRows.find((item) => (item.code || item.name) === filters.university)?.id || ''
+  const faculties = facultyRows
+    .filter((item) => !selectedUniversityId || item.university_id === selectedUniversityId)
+    .map((item) => item.name)
+    .filter(Boolean)
+  const selectedFacultyId = facultyRows.find((item) => item.name === filters.faculty && (!selectedUniversityId || item.university_id === selectedUniversityId))?.id || ''
+  const careers = careerRows
+    .filter((item) => !selectedFacultyId || item.faculty_id === selectedFacultyId)
+    .map((item) => item.name)
+    .filter(Boolean)
+  const cycles = cycleRows.map((item) => item.name).filter(Boolean)
 
   const matchesContext = (item) => {
     const university = item?.university?.code || item?.university?.name || ''
@@ -2717,6 +3170,7 @@ function AdminDashboard({ data, onLoad, setScreen }) {
         <button className="btn secondary" onClick={() => setScreen('admin-courses')}>📚 Gestionar cursos</button>
         <button className="btn secondary" onClick={() => setScreen('admin-calculations')}>📊 Ver cálculos</button>
         <button className="btn secondary" onClick={() => setScreen('admin-evaluations')}>🧩 Métodos de evaluación</button>
+        <button className="btn secondary" onClick={() => setScreen('admin-communication')}>💬 Comunicación</button>
       </div>
     </div>
   )
@@ -2724,68 +3178,99 @@ function AdminDashboard({ data, onLoad, setScreen }) {
 
 function AdminUsers({ data, onLoad, onToggle, onRole }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const [q, setQ] = useState('')
-  const [filter, setFilter] = useState('all')
+  const [filters, setFilters] = useState({ q: '', status: '', activity: '' })
+  const rawUsers = data?.users || []
   const studentCourses = data?.studentCourses || []
   const calculations = data?.calculations || []
   const logins = data?.logins || []
   const usageEvents = data?.usageEvents || []
 
-  const courseCount = new Map()
-  studentCourses
-    .filter((item) => item.status === 'visible')
-    .forEach((item) => courseCount.set(item.user_id, (courseCount.get(item.user_id) || 0) + 1))
-
-  const calculationCount = new Map()
-  calculations.forEach((item) => calculationCount.set(item.user_id, (calculationCount.get(item.user_id) || 0) + 1))
-
-  const lastLogin = new Map()
-  logins.forEach((item) => {
-    if (!lastLogin.has(item.user_id)) lastLogin.set(item.user_id, item.login_at)
+  const courseStats = new Map()
+  studentCourses.forEach((item) => {
+    if (!item.user_id || item.status === 'hidden') return
+    courseStats.set(item.user_id, (courseStats.get(item.user_id) || 0) + 1)
   })
 
-  const lastActivity = new Map()
+  const calculationStats = new Map()
+  calculations.forEach((item) => {
+    if (!item.user_id) return
+    calculationStats.set(item.user_id, (calculationStats.get(item.user_id) || 0) + 1)
+  })
+
+  const realActivityStats = new Map()
   usageEvents.forEach((item) => {
-    if (!lastActivity.has(item.user_id)) lastActivity.set(item.user_id, item.created_at)
+    if (!item.user_id) return
+    const prev = realActivityStats.get(item.user_id)
+    realActivityStats.set(item.user_id, safeMaxDate(prev, item.created_at))
   })
 
-  const enrichedUsers = (data?.users || []).map((user) => {
-    const userLastLogin = lastLogin.get(user.id) || null
-    const userLastActivity = lastActivity.get(user.id) || null
-    const lastSeen = latestDate(userLastActivity, userLastLogin)
+  const lastLoginStats = new Map()
+  logins.forEach((item) => {
+    if (!item.user_id) return
+    const prev = lastLoginStats.get(item.user_id)
+    lastLoginStats.set(item.user_id, safeMaxDate(prev, item.login_at))
+  })
+
+  const enrichedUsers = rawUsers.map((user) => {
+    const coursesCount = courseStats.get(user.id) || 0
+    const calculationsCount = calculationStats.get(user.id) || 0
+    const lastLogin = lastLoginStats.get(user.id) || null
+    const lastActivity = realActivityStats.get(user.id) || null
+    const realUse = coursesCount > 0 || calculationsCount > 0 || Boolean(lastActivity)
     return {
       ...user,
-      course_count: courseCount.get(user.id) || 0,
-      calculation_count: calculationCount.get(user.id) || 0,
-      last_login_at: userLastLogin,
-      last_activity_at: userLastActivity,
-      inactivity_days: daysSince(lastSeen)
+      coursesCount,
+      calculationsCount,
+      lastLogin,
+      lastActivity,
+      realUse,
+      inactiveDays: daysSince(lastLogin),
+      realInactiveDays: daysSince(lastActivity)
     }
   })
 
-  const users = enrichedUsers
-    .filter((u) => `${fullName(u)} ${u.email} ${u.university?.code || ''} ${u.career?.name || ''}`.toLowerCase().includes(q.toLowerCase()))
-    .filter((u) => {
-      if (filter === 'without_courses') return u.course_count === 0
-      if (filter === 'without_real_activity') return !u.last_activity_at
-      if (filter === 'inactive_7') return (u.inactivity_days ?? 9999) >= 7
-      if (filter === 'inactive_15') return (u.inactivity_days ?? 9999) >= 15
-      if (filter === 'inactive_30') return (u.inactivity_days ?? 9999) >= 30
-      return true
-    })
+  const users = enrichedUsers.filter((user) => {
+    const text = `${fullName(user)} ${user.email} ${user.university?.code || ''} ${user.faculty?.name || ''} ${user.career?.name || ''} ${user.cycle?.name || ''}`.toLowerCase()
+    const matchesQ = text.includes(filters.q.toLowerCase())
+    const matchesStatus = !filters.status || user.status === filters.status
+    let matchesActivity = true
+    if (filters.activity === 'no-courses') matchesActivity = user.coursesCount === 0
+    if (filters.activity === 'no-calculations') matchesActivity = user.calculationsCount === 0
+    if (filters.activity === 'no-real') matchesActivity = !user.realUse
+    if (filters.activity === 'inactive-7') matchesActivity = user.inactiveDays === null || user.inactiveDays >= 7
+    if (filters.activity === 'inactive-15') matchesActivity = user.inactiveDays === null || user.inactiveDays >= 15
+    if (filters.activity === 'inactive-30') matchesActivity = user.inactiveDays === null || user.inactiveDays >= 30
+    return matchesQ && matchesStatus && matchesActivity
+  })
+
+  const withoutCourses = enrichedUsers.filter((u) => u.coursesCount === 0).length
+  const withoutRealUse = enrichedUsers.filter((u) => !u.realUse).length
+  const inactive30 = enrichedUsers.filter((u) => u.inactiveDays === null || u.inactiveDays >= 30).length
 
   return (
     <div className="page fade-in">
-      <Header title="Usuarios" subtitle="Ver cursos registrados, última conexión, actividad real y estado." />
+      <Header title="Usuarios" subtitle="Ver actividad, cursos registrados, última conexión y estado." />
+      <div className="cards stats-grid">
+        <StatCard icon="👥" label="Usuarios" value={rawUsers.length} />
+        <StatCard icon="📚" label="Sin cursos" value={withoutCourses} />
+        <StatCard icon="🔥" label="Sin uso real" value={withoutRealUse} />
+        <StatCard icon="🕒" label="Inactivos 30+ días" value={inactive30} />
+      </div>
       <div className="filters admin-course-filters">
-        <input className="input" placeholder="Buscar usuario, correo, universidad o carrera" value={q} onChange={(e) => setQ(e.target.value)} />
-        <select className="input" value={filter} onChange={(e) => setFilter(e.target.value)}>
-          <option value="all">Todos los usuarios</option>
-          <option value="without_courses">Sin cursos registrados</option>
-          <option value="without_real_activity">Sin actividad real</option>
-          <option value="inactive_7">Inactivos 7+ días</option>
-          <option value="inactive_15">Inactivos 15+ días</option>
-          <option value="inactive_30">Inactivos 30+ días</option>
+        <input className="input" placeholder="Buscar usuario, correo o contexto" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+        <select className="input" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+          <option value="">Todos los estados</option>
+          <option value="active">Activos</option>
+          <option value="inactive">Dados de baja</option>
+        </select>
+        <select className="input" value={filters.activity} onChange={(e) => setFilters({ ...filters, activity: e.target.value })}>
+          <option value="">Todos los usuarios</option>
+          <option value="no-courses">Sin cursos registrados</option>
+          <option value="no-calculations">Sin cálculos guardados</option>
+          <option value="no-real">Sin actividad real</option>
+          <option value="inactive-7">Inactivos 7+ días</option>
+          <option value="inactive-15">Inactivos 15+ días</option>
+          <option value="inactive-30">Inactivos 30+ días</option>
         </select>
       </div>
       <div className="admin-list admin-scroll-list">
@@ -2795,15 +3280,15 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
               <div>
                 <h3>{fullName(user)}</h3>
                 <p>{user.email} · {user.university?.code || 'Sin universidad'} · {user.career?.name || 'Sin carrera'} · {user.cycle?.name || 'Sin ciclo'}</p>
+                <p className="hint">Última conexión: <b>{formatLastSeen(user.lastLogin)}</b> · Inactividad: <b>{inactivityLabel(user.lastLogin)}</b></p>
+                <p className="hint">Última actividad real: <b>{formatLastSeen(user.lastActivity)}</b> · Uso real: <b>{user.realUse ? 'Sí' : 'No'}</b></p>
               </div>
               <span className={`badge ${user.status}`}>{formatStatus(user.status)}</span>
             </div>
-            <div className="user-admin-metrics">
-              <span>📚 Cursos: <b>{user.course_count}</b></span>
-              <span>📊 Cálculos: <b>{user.calculation_count}</b></span>
-              <span>🕒 Última conexión: <b>{user.last_login_at ? `${dateOnly(user.last_login_at)} ${timeOnly(user.last_login_at)}` : 'Sin registro'}</b></span>
-              <span>🔥 Última actividad: <b>{user.last_activity_at ? `${dateOnly(user.last_activity_at)} ${timeOnly(user.last_activity_at)}` : 'Sin actividad real'}</b></span>
-              <span>⏳ Inactividad: <b>{user.inactivity_days === null ? 'Sin datos' : `${user.inactivity_days} días`}</b></span>
+            <div className="mini-stats-row">
+              <StatBox label="Cursos" value={user.coursesCount} />
+              <StatBox label="Cálculos" value={user.calculationsCount} />
+              <StatBox label="Rol" value={formatRole(user.role)} />
             </div>
             <div className="action-row left">
               <button className="btn secondary small" onClick={() => onToggle(user)}>{user.status === 'active' ? 'Dar de baja' : 'Reactivar'}</button>
@@ -2818,31 +3303,20 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
 
 function AdminCourses({ data, onLoad, onUpdate }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const [filters, setFilters] = useState({ q: '', university: '', faculty: '', career: '', cycle: '' })
+  const [filters, setFilters] = useState({ q: '', universityId: '', facultyId: '', careerId: '', cycleId: '' })
   const allCourses = data?.courses || []
-  const allUniversities = data?.universities || []
-  const allFaculties = data?.faculties || []
-  const allCareers = data?.careers || []
-  const allCycles = data?.cycles || []
-  const universities = unique(allUniversities.map((u) => u.code || u.name).filter(Boolean))
-  const faculties = unique(allFaculties
-    .filter((f) => !filters.university || (f.university?.code || f.university?.name) === filters.university)
-    .map((f) => f.name)
-    .filter(Boolean))
-  const careers = unique(allCareers
-    .filter((c) => !filters.university || (c.faculty?.university?.code || c.faculty?.university?.name) === filters.university)
-    .filter((c) => !filters.faculty || c.faculty?.name === filters.faculty)
-    .map((c) => c.name)
-    .filter(Boolean))
-  const cycles = unique(allCycles.map((c) => c.name).filter(Boolean))
+  const universities = data?.universities || []
+  const faculties = (data?.faculties || []).filter((faculty) => !filters.universityId || faculty.university_id === filters.universityId)
+  const careers = (data?.careers || []).filter((career) => !filters.facultyId || career.faculty_id === filters.facultyId)
+  const cycles = data?.cycles || []
 
   const courses = allCourses.filter((course) => {
     const contextText = `${course.name} ${creatorName(course)} ${course.university?.code || ''} ${course.faculty?.name || ''} ${course.career?.name || ''} ${course.cycle?.name || ''}`.toLowerCase()
     const matchesQ = contextText.includes(filters.q.toLowerCase())
-    const matchesUniversity = !filters.university || (course.university?.code || course.university?.name) === filters.university
-    const matchesFaculty = !filters.faculty || course.faculty?.name === filters.faculty
-    const matchesCareer = !filters.career || course.career?.name === filters.career
-    const matchesCycle = !filters.cycle || course.cycle?.name === filters.cycle
+    const matchesUniversity = !filters.universityId || course.university_id === filters.universityId
+    const matchesFaculty = !filters.facultyId || course.faculty_id === filters.facultyId
+    const matchesCareer = !filters.careerId || course.career_id === filters.careerId
+    const matchesCycle = !filters.cycleId || course.cycle_id === filters.cycleId
     return matchesQ && matchesUniversity && matchesFaculty && matchesCareer && matchesCycle
   })
 
@@ -2851,20 +3325,20 @@ function AdminCourses({ data, onLoad, onUpdate }) {
       <Header title="Cursos" subtitle="Editar nombres, ver creador y dar de baja cursos." />
       <div className="filters admin-course-filters">
         <input className="input" placeholder="Buscar curso, creador o contexto" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
-        <select className="input" value={filters.university} onChange={(e) => setFilters({ ...filters, university: e.target.value, faculty: '', career: '' })}>
-          <option value="">Todas las universidades</option>{universities.map((u) => <option key={u}>{u}</option>)}
+        <select className="input" value={filters.universityId} onChange={(e) => setFilters({ ...filters, universityId: e.target.value, facultyId: '', careerId: '' })}>
+          <option value="">Todas las universidades</option>{universities.map((u) => <option key={u.id} value={u.id}>{u.code || u.name}</option>)}
         </select>
-        <select className="input" value={filters.faculty} onChange={(e) => setFilters({ ...filters, faculty: e.target.value, career: '' })}>
-          <option value="">Todas las facultades</option>{faculties.map((f) => <option key={f}>{f}</option>)}
+        <select className="input" value={filters.facultyId} onChange={(e) => setFilters({ ...filters, facultyId: e.target.value, careerId: '' })}>
+          <option value="">Todas las facultades</option>{faculties.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
-        <select className="input" value={filters.career} onChange={(e) => setFilters({ ...filters, career: e.target.value })}>
-          <option value="">Todas las carreras</option>{careers.map((c) => <option key={c}>{c}</option>)}
+        <select className="input" value={filters.careerId} onChange={(e) => setFilters({ ...filters, careerId: e.target.value })}>
+          <option value="">Todas las carreras</option>{careers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select className="input" value={filters.cycle} onChange={(e) => setFilters({ ...filters, cycle: e.target.value })}>
-          <option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c}>{c}</option>)}
+        <select className="input" value={filters.cycleId} onChange={(e) => setFilters({ ...filters, cycleId: e.target.value })}>
+          <option value="">Todos los ciclos</option>{cycles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </div>
-      {courses.length === 0 && <Empty text="No hay cursos para los filtros seleccionados. Revisa que se haya ejecutado la migración v1.1.2." compact />}
+      {courses.length === 0 && <Empty text="No hay cursos para los filtros seleccionados. La carrera puede no tener cursos activos cargados todavía." compact />}
       <div className="admin-list admin-scroll-list">
         {courses.map((course) => <AdminCourseCard key={course.id} course={course} onUpdate={onUpdate} />)}
       </div>
