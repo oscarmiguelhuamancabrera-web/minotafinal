@@ -64,6 +64,7 @@ create table if not exists public.student_courses (
   course_id uuid not null references public.courses(id) on delete cascade,
   enrollment_type text not null default 'regular'
     check (enrollment_type in ('regular', 'arrastrado', 'adelantado', 'electivo', 'otro')),
+  credits numeric(5,2) not null default 1 check (credits > 0 and credits <= 30),
   status text not null default 'visible'
     check (status in ('visible', 'hidden')),
   created_at timestamptz not null default now(),

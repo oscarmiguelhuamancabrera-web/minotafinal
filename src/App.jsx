@@ -20,7 +20,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.8-fix-modal'
+const APP_VERSION = '1.1.10-promedio-ponderado'
 
 const GUIDED_TOUR_STEPS = [
   { screen: 'courses', target: 'course-overview', title: 'Agrega tus cursos', text: 'Este es el punto de partida. Aquí eliges únicamente los cursos que estás llevando.' },
@@ -507,6 +507,84 @@ function courseCycleName(course) {
 
 function latestHistoryForCourse(history, courseId) {
   return (history || []).find((item) => item.course_id === courseId) || null
+}
+
+function courseCredits(course) {
+  const credits = toNumber(course?.credits)
+  return credits !== null && credits > 0 ? credits : 1
+}
+
+function weightedAverageSummary(courses = [], history = []) {
+  const rows = (courses || [])
+    .map((course) => {
+      const latest = latestHistoryForCourse(history, course.id)
+      const average = toNumber(latest?.current_average)
+      const credits = courseCredits(course)
+      if (average === null) return null
+      return {
+        course,
+        latest,
+        average,
+        credits,
+        points: average * credits
+      }
+    })
+    .filter(Boolean)
+
+  const totalCredits = rows.reduce((sum, item) => sum + item.credits, 0)
+  const totalPoints = rows.reduce((sum, item) => sum + item.points, 0)
+
+  return {
+    rows,
+    totalCredits,
+    average: totalCredits > 0 ? totalPoints / totalCredits : null
+  }
+}
+
+function uniqueValidCalculations(items = []) {
+  const seen = new Set()
+  return (items || []).filter((item) => {
+    if (!item?.id || !item?.user_id || seen.has(item.id)) return false
+    seen.add(item.id)
+    return toNumber(item.current_average) !== null
+  })
+}
+
+function canAdminViewStudent(adminProfile, student) {
+  if (!adminProfile || !student) return false
+  if (adminProfile.role === 'superadmin') return true
+  if (adminProfile.role !== 'admin') return false
+  if (!adminProfile.university_id) return true
+  return adminProfile.university_id === student.university_id
+}
+
+function calculationDetailRows(item) {
+  const snapshotComponents = item?.evaluation_snapshot?.components
+  if (Array.isArray(snapshotComponents) && snapshotComponents.length) {
+    return snapshotComponents.map((component, index) => {
+      const percent = toNumber(component.percent)
+      const score = toNumber(component.score)
+      return {
+        key: `${component.label || component.name || 'component'}-${index}`,
+        name: component.label || component.name || `Evaluación ${index + 1}`,
+        score,
+        percent,
+        contribution: score !== null && percent !== null ? (score * percent) / 100 : null
+      }
+    })
+  }
+
+  return EVALUATIONS.map((evaluation) => {
+    const percent = toNumber(DEFAULT_SETTINGS[evaluation.percentKey])
+    const score = toNumber(item?.[evaluation.key])
+    return {
+      key: evaluation.key,
+      name: evaluation.label,
+      score,
+      percent,
+      contribution: score !== null && percent !== null ? (score * percent) / 100 : null
+    }
+  })
 }
 
 function buildProfileFromAuthUser(user) {
@@ -1073,12 +1151,21 @@ function App() {
       return
     }
 
-    const studentRes = await supabase
+    let studentRes = await supabase
       .from('student_courses')
-      .select(`id,enrollment_type,status,course_id,course:courses!inner(${COURSE_SELECT})`)
+      .select(`id,enrollment_type,status,credits,course_id,course:courses!inner(${COURSE_SELECT})`)
       .eq('user_id', userProfile.id)
       .eq('status', 'visible')
       .eq('course.status', 'active')
+
+    if (studentRes.error && String(studentRes.error.message || '').toLowerCase().includes('credits')) {
+      studentRes = await supabase
+        .from('student_courses')
+        .select(`id,enrollment_type,status,course_id,course:courses!inner(${COURSE_SELECT})`)
+        .eq('user_id', userProfile.id)
+        .eq('status', 'visible')
+        .eq('course.status', 'active')
+    }
 
     if (!studentRes.error) {
       const myCourses = (studentRes.data || [])
@@ -1086,6 +1173,7 @@ function App() {
           ...row.course,
           student_course_id: row.id,
           enrollment_type: row.enrollment_type || 'regular',
+          credits: row.credits ?? 1,
           student_course_status: row.status || 'visible'
         }))
         .sort((a, b) => {
@@ -1747,6 +1835,52 @@ function App() {
     }
   }
 
+  async function handleUpdateStudentCourseCredits(course, creditsValue) {
+    if (!session?.user || !course?.id) return
+    const credits = toNumber(creditsValue)
+    if (credits === null || credits <= 0 || credits > 30) {
+      notify('error', 'Los créditos deben ser mayores que 0 y menores o iguales a 30.')
+      return
+    }
+    if (Math.abs(credits - courseCredits(course)) < 0.001) return
+
+    const payload = {
+      credits,
+      updated_at: new Date().toISOString()
+    }
+
+    const query = course.student_course_id
+      ? supabase
+        .from('student_courses')
+        .update(payload)
+        .eq('id', course.student_course_id)
+        .eq('user_id', session.user.id)
+      : supabase
+        .from('student_courses')
+        .upsert({
+          user_id: session.user.id,
+          course_id: course.id,
+          university_id: course.university_id || profile?.university_id || null,
+          faculty_id: course.faculty_id || profile?.faculty_id || null,
+          career_id: course.career_id || profile?.career_id || null,
+          cycle_id: course.cycle_id || null,
+          enrollment_type: course.enrollment_type || 'regular',
+          status: 'visible',
+          ...payload
+        }, { onConflict: 'user_id,course_id' })
+
+    const { error } = await query
+    if (error) {
+      const message = String(error.message || '').toLowerCase().includes('credits')
+        ? 'Ejecuta la migración v1.1.10 para habilitar créditos por curso.'
+        : getErrorMessage(error)
+      notify('error', message)
+      return
+    }
+    notify('success', 'Créditos actualizados.')
+    await loadCourses()
+  }
+
   async function handleUpdateProfile(values) {
     if (!session?.user) return
     const email = session.user.email || profile?.email || ''
@@ -1807,7 +1941,7 @@ function App() {
   }
 
   async function loadAdminData() {
-    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, careersRes, cyclesRes, templatesRes, componentsRes, usageRes, requestsRes, announcementsRes, suggestionsRes] = await Promise.all([
+    const [profilesRes, coursesRes, calculationsRes, loginsRes, studentCoursesRes, universitiesRes, facultiesRes, careersRes, cyclesRes, templatesRes, componentsRes, usageRes, requestsRes, announcementsRes, suggestionsRes, activitySummaryRes] = await Promise.all([
       supabase.from('profiles').select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(name), cycle:cycles(name,order_number)').order('created_at', { ascending: false }),
       supabase.from('courses').select(COURSE_SELECT_ADMIN).order('created_at', { ascending: false }),
       supabase.from('calculation_history').select('*, profile:profiles(first_name,last_name,email,career_id,current_cycle_id, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), course:courses(name, university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name)), evaluation_template:evaluation_templates(name)').order('created_at', { ascending: false }).limit(300),
@@ -1823,7 +1957,8 @@ function App() {
       supabase.from('course_requests').select('*, requester:profiles!course_requests_requested_by_fkey(first_name,last_name,email), university:universities(name,code), faculty:faculties(name), career:careers(name), cycle:cycles(name), linked_course:courses(name)').order('created_at', { ascending: false }).limit(500),
       supabase.from('announcements').select('*, creator:profiles(first_name,last_name,email), university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name), cycle:cycles(id,name,order_number)').order('created_at', { ascending: false }).limit(500),
       // Se carga sin joins embebidos para evitar errores PGRST201 cuando existen varias relaciones con profiles.
-      supabase.from('user_suggestions').select('*').order('created_at', { ascending: false }).limit(800)
+      supabase.from('user_suggestions').select('*').order('created_at', { ascending: false }).limit(800),
+      supabase.from('admin_user_activity_summary').select('user_id,calculations_count')
     ])
 
     const profileRows = profilesRes.data || []
@@ -1852,6 +1987,8 @@ function App() {
       users: profileRows,
       courses: coursesRes.data || [],
       calculations: calculationsRes.data || [],
+      activitySummary: activitySummaryRes.error ? [] : activitySummaryRes.data || [],
+      activitySummaryError: activitySummaryRes.error ? getErrorMessage(activitySummaryRes.error) : '',
       logins: loginsRes.data || [],
       studentCourses: studentCoursesRes.data || [],
       universities: universityRows,
@@ -2130,7 +2267,7 @@ function App() {
               />
             )}
             {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} announcements={announcements} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
-            {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onAddAll={handleAddAllStudentCourses} onHide={handleHideStudentCourse} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
+            {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onAddAll={handleAddAllStudentCourses} onHide={handleHideStudentCourse} onUpdateCredits={handleUpdateStudentCourseCredits} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
               <CalculatorScreen
                 title="Calcular nota"
@@ -2180,7 +2317,7 @@ function App() {
             {screen === 'about' && <About />}
             {screen === 'more' && <MoreScreen isAdmin={isAdmin} guestMode={guestMode} setScreen={setScreen} onSignOut={async () => { setGuestMode(false); await supabase.auth.signOut() }} />}
             {session && isAdmin && screen === 'admin-dashboard' && <AdminDashboard data={adminData} onLoad={loadAdminData} setScreen={setScreen} />}
-            {session && isAdmin && screen === 'admin-users' && <AdminUsers data={adminData} onLoad={loadAdminData} onToggle={toggleUserStatus} onRole={changeUserRole} />}
+            {session && isAdmin && screen === 'admin-users' && <AdminUsers data={adminData} profile={profile} onLoad={loadAdminData} onToggle={toggleUserStatus} onRole={changeUserRole} />}
             {session && isAdmin && screen === 'admin-courses' && <AdminCourses data={adminData} onLoad={loadAdminData} onUpdate={updateCourseAdmin} />}
             {session && isAdmin && screen === 'admin-calculations' && <AdminCalculations data={adminData} onLoad={loadAdminData} />}
             {session && isAdmin && screen === 'admin-evaluations' && <AdminEvaluations data={adminData} onLoad={loadAdminData} onCreateTemplate={createEvaluationTemplate} onUpdateTemplate={updateEvaluationTemplate} onCreateComponent={createEvaluationComponent} onUpdateComponent={updateEvaluationComponent} />}
@@ -2458,6 +2595,8 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
 function Dashboard({ profile, courses, history, announcements = [], setScreen, onSelectCourse }) {
   const visiblePageAnnouncements = announcements.filter((item) => item.display_mode !== 'modal' && !item.read?.dismissed_at)
   const featuredAnnouncement = visiblePageAnnouncements.find((item) => item.display_mode === 'banner') || visiblePageAnnouncements[0]
+  const weightedSummary = weightedAverageSummary(courses, history)
+  const pendingWeightedCourses = Math.max(0, courses.length - weightedSummary.rows.length)
   return (
     <div className="page fade-in">
       <div className="hero-panel">
@@ -2473,6 +2612,7 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
       </div>
       <div className="cards stats-grid">
         <StatCard icon="📚" label="Mis cursos actuales" value={courses.length} />
+        <StatCard icon="⚖️" label="Promedio ponderado" value={weightedSummary.average === null ? '—' : formatNumber(weightedSummary.average)} />
         <StatCard icon="📊" label="Resultados guardados" value={history.length} />
         <StatCard icon="🏛️" label="Universidad" value={profile?.university?.code || '—'} />
       </div>
@@ -2499,13 +2639,21 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
         )}
         {courses.length > 0 && (
           <div className="student-summary-list">
+            <div className="weighted-summary-panel">
+              <div>
+                <span>Promedio ponderado</span>
+                <strong>{weightedSummary.average === null ? '—' : formatNumber(weightedSummary.average)}</strong>
+                <small>{weightedSummary.totalCredits ? `${formatNumber(weightedSummary.totalCredits, 1)} créditos con resultado guardado` : 'Guarda resultados para calcularlo'}</small>
+              </div>
+              {pendingWeightedCourses > 0 && <p>{pendingWeightedCourses} curso{pendingWeightedCourses === 1 ? '' : 's'} aún no entra{pendingWeightedCourses === 1 ? '' : 'n'} al cálculo.</p>}
+            </div>
             {courses.map((course) => {
               const latest = latestHistoryForCourse(history, course.id)
               return (
                 <div className="student-summary-row" key={course.id}>
                   <div>
                     <h3>{course.name}</h3>
-                    <p>{courseCycleName(course)} · {formatEnrollmentType(course.enrollment_type)}</p>
+                    <p>{courseCycleName(course)} · {formatEnrollmentType(course.enrollment_type)} · {formatNumber(courseCredits(course), 1)} créditos</p>
                   </div>
                   <div className="summary-status">
                     <b>{latest ? formatNumber(latest.current_average) : 'Pendiente'}</b>
@@ -2528,7 +2676,7 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
   )
 }
 
-function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, onAdd, onAddAll, onHide, onSelect }) {
+function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, onAdd, onAddAll, onHide, onUpdateCredits, onSelect }) {
   const [cycleId, setCycleId] = useState(profile?.current_cycle_id || '')
   const [courseId, setCourseId] = useState('')
   const [enrollmentType, setEnrollmentType] = useState('regular')
@@ -2624,6 +2772,16 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
                 <h3>{course.name}</h3>
                 <p>{courseCycleName(course)} · <b>{formatEnrollmentType(course.enrollment_type)}</b> · {course.university?.code || ''} · Creado por: {creatorName(course)}</p>
               </div>
+              <label className="credit-field">
+                <span>Créditos</span>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  defaultValue={formatNumber(courseCredits(course), 1)}
+                  onBlur={(event) => onUpdateCredits?.(course, event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                />
+              </label>
               <div className="action-row left compact-actions">
                 <button className="btn secondary small" onClick={() => onSelect(course.id)}>Calcular</button>
                 <button className="btn ghost small" onClick={() => onHide(course)}>Ocultar</button>
@@ -3567,14 +3725,16 @@ function AdminDashboard({ data, onLoad, setScreen }) {
   )
 }
 
-function AdminUsers({ data, onLoad, onToggle, onRole }) {
+function AdminUsers({ data, profile, onLoad, onToggle, onRole }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState({ q: '', status: '', activity: '' })
+  const [selectedCalculationsUser, setSelectedCalculationsUser] = useState(null)
   const rawUsers = data?.users || []
   const studentCourses = data?.studentCourses || []
-  const calculations = data?.calculations || []
+  const calculations = uniqueValidCalculations(data?.calculations || [])
   const logins = data?.logins || []
   const usageEvents = data?.usageEvents || []
+  const activitySummary = data?.activitySummary || []
 
   const courseStats = new Map()
   studentCourses.forEach((item) => {
@@ -3586,6 +3746,10 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
   calculations.forEach((item) => {
     if (!item.user_id) return
     calculationStats.set(item.user_id, (calculationStats.get(item.user_id) || 0) + 1)
+  })
+  activitySummary.forEach((item) => {
+    if (!item.user_id) return
+    calculationStats.set(item.user_id, Number(item.calculations_count || 0))
   })
 
   const realActivityStats = new Map()
@@ -3678,7 +3842,7 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
             </div>
             <div className="mini-stats-row">
               <StatBox label="Cursos" value={user.coursesCount} />
-              <StatBox label="Cálculos" value={user.calculationsCount} />
+              <StatBox label="Cálculos" value={user.calculationsCount} onClick={() => setSelectedCalculationsUser(user)} />
               <StatBox label="Rol" value={formatRole(user.role)} />
             </div>
             <div className="action-row left">
@@ -3688,7 +3852,141 @@ function AdminUsers({ data, onLoad, onToggle, onRole }) {
           </Card>
         ))}
       </div>
+      {selectedCalculationsUser && (
+        <AdminStudentCalculationsModal
+          student={selectedCalculationsUser}
+          adminProfile={profile}
+          expectedCount={selectedCalculationsUser.calculationsCount}
+          onClose={() => setSelectedCalculationsUser(null)}
+        />
+      )}
     </div>
+  )
+}
+
+function AdminStudentCalculationsModal({ student, adminProfile, expectedCount, onClose }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [openDetailId, setOpenDetailId] = useState('')
+
+  useEffect(() => {
+    let active = true
+    setItems([])
+    setError('')
+    setOpenDetailId('')
+    setLoading(true)
+
+    async function loadStudentCalculations() {
+      if (!student?.id) {
+        if (active) {
+          setError('No se encontró el identificador del estudiante.')
+          setLoading(false)
+        }
+        return
+      }
+      if (!canAdminViewStudent(adminProfile, student)) {
+        if (active) {
+          setError('No tienes permiso para consultar los cálculos de este estudiante.')
+          setLoading(false)
+        }
+        return
+      }
+
+      let query = supabase
+        .from('calculation_history')
+        .select('id,user_id,course_id,pc1,pc2,pc3,pc4,partial_exam,final_exam,current_average,evaluated_weight,pending_weight,pending_evaluations,required_average,status,created_at,evaluation_snapshot,profile:profiles!inner(id,first_name,last_name,email,university_id,faculty_id,career_id,current_cycle_id, university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name), cycle:cycles(id,name)), course:courses(id,name,university_id,faculty_id,career_id,cycle_id, university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name), cycle:cycles(id,name)), evaluation_template:evaluation_templates(id,name)')
+        .eq('user_id', student.id)
+        .order('created_at', { ascending: false })
+
+      const { data, error: queryError } = await query
+      if (!active) return
+      if (queryError) {
+        setError(getErrorMessage(queryError))
+        setItems([])
+      } else {
+        setItems(uniqueValidCalculations(data || []))
+      }
+      setLoading(false)
+    }
+
+    loadStudentCalculations()
+    return () => { active = false }
+  }, [student, adminProfile])
+
+  const total = loading ? expectedCount : items.length
+
+  return (
+    <div className="floating-announcement-backdrop admin-calculations-backdrop" role="dialog" aria-modal="true" aria-label={`Cálculos de ${fullName(student)}`}>
+      <section className="admin-calculations-modal">
+        <header className="admin-calculations-header">
+          <div>
+            <h2>Cálculos de {fullName(student)}</h2>
+            <p>{student.email || 'Sin correo'} · {total} cálculo{Number(total) === 1 ? '' : 's'} guardado{Number(total) === 1 ? '' : 's'}</p>
+          </div>
+          <button type="button" aria-label="Cerrar" onClick={onClose}>×</button>
+        </header>
+        <div className="admin-calculations-body">
+          {loading && <Empty text="Cargando cálculos del estudiante..." compact />}
+          {!loading && error && <Empty text={`No se pudieron cargar los cálculos: ${error}`} compact />}
+          {!loading && !error && items.length === 0 && <Empty text="Este estudiante no tiene cálculos guardados." compact />}
+          {!loading && !error && items.length > 0 && (
+            <div className="admin-calculations-list">
+              {items.map((item) => (
+                <AdminCalculationRow
+                  key={item.id}
+                  item={item}
+                  expanded={openDetailId === item.id}
+                  onToggle={() => setOpenDetailId(openDetailId === item.id ? '' : item.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function AdminCalculationRow({ item, expanded, onToggle }) {
+  const rows = calculationDetailRows(item)
+  const templateName = item.evaluation_template?.name || item.evaluation_snapshot?.template?.name || 'Plantilla clásica'
+  const status = ['Aprobado', 'Desaprobado'].includes(item.status) ? item.status : 'En progreso'
+  return (
+    <article className="admin-calculation-item">
+      <div className="admin-calculation-summary">
+        <div>
+          <h3>{item.course?.name || 'Curso eliminado'}</h3>
+          <p>{dateOnly(item.created_at)} · {templateName}</p>
+        </div>
+        <b>{formatNumber(item.current_average)}</b>
+        <button type="button" className="btn secondary small" onClick={onToggle}>{expanded ? 'Ocultar detalle' : 'Ver detalle'}</button>
+      </div>
+      {expanded && (
+        <div className="admin-calculation-detail">
+          <div className="calculation-detail-grid">
+            <span>Evaluación</span>
+            <span>Nota</span>
+            <span>Peso</span>
+            <span>Aporte</span>
+            {rows.map((row) => (
+              <div className="calculation-detail-row" key={row.key}>
+                <b>{row.name}</b>
+                <span>{row.score === null ? 'Pendiente' : formatNumber(row.score)}</span>
+                <span>{row.percent === null ? '—' : `${formatPercent(row.percent)}%`}</span>
+                <span>{row.contribution === null ? '—' : formatNumber(row.contribution)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="calculation-detail-meta">
+            <p><b>Evaluaciones pendientes:</b> {item.pending_evaluations || 'Ninguna'}</p>
+            <p><b>Promedio actual o final:</b> {formatNumber(item.current_average)}</p>
+            <p><b>Plantilla de evaluación:</b> {templateName}</p>
+            <p><b>Estado:</b> {status}</p>
+          </div>
+        </div>
+      )}
+    </article>
   )
 }
 
@@ -3974,7 +4272,10 @@ function StatCard({ icon, label, value }) {
   return <Card className="stat-card"><span>{icon}</span><div><strong>{value}</strong><p>{label}</p></div></Card>
 }
 
-function StatBox({ label, value }) {
+function StatBox({ label, value, onClick }) {
+  if (onClick) {
+    return <button type="button" className="stat-box stat-box-button" onClick={onClick}><small>{label}</small><b>{value}</b></button>
+  }
   return <div className="stat-box"><small>{label}</small><b>{value}</b></div>
 }
 
