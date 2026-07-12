@@ -550,6 +550,16 @@ function uniqueValidCalculations(items = []) {
   })
 }
 
+function latestCalculationPerCourse(items = []) {
+  const seenCourses = new Set()
+  return uniqueValidCalculations(items).filter((item) => {
+    const courseKey = item.course_id || item.course?.id || `calculation-${item.id}`
+    if (seenCourses.has(courseKey)) return false
+    seenCourses.add(courseKey)
+    return true
+  })
+}
+
 function canAdminViewStudent(adminProfile, student) {
   if (!adminProfile || !student) return false
   if (adminProfile.role === 'superadmin') return true
@@ -3856,7 +3866,6 @@ function AdminUsers({ data, profile, onLoad, onToggle, onRole }) {
         <AdminStudentCalculationsModal
           student={selectedCalculationsUser}
           adminProfile={profile}
-          expectedCount={selectedCalculationsUser.calculationsCount}
           onClose={() => setSelectedCalculationsUser(null)}
         />
       )}
@@ -3864,7 +3873,7 @@ function AdminUsers({ data, profile, onLoad, onToggle, onRole }) {
   )
 }
 
-function AdminStudentCalculationsModal({ student, adminProfile, expectedCount, onClose }) {
+function AdminStudentCalculationsModal({ student, adminProfile, onClose }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -3905,7 +3914,7 @@ function AdminStudentCalculationsModal({ student, adminProfile, expectedCount, o
         setError(getErrorMessage(queryError))
         setItems([])
       } else {
-        setItems(uniqueValidCalculations(data || []))
+        setItems(latestCalculationPerCourse(data || []))
       }
       setLoading(false)
     }
@@ -3914,7 +3923,7 @@ function AdminStudentCalculationsModal({ student, adminProfile, expectedCount, o
     return () => { active = false }
   }, [student, adminProfile])
 
-  const total = loading ? expectedCount : items.length
+  const totalLabel = loading ? 'Cargando cálculos...' : `${items.length} cálculo${items.length === 1 ? '' : 's'} guardado${items.length === 1 ? '' : 's'}`
 
   return (
     <div className="floating-announcement-backdrop admin-calculations-backdrop" role="dialog" aria-modal="true" aria-label={`Cálculos de ${fullName(student)}`}>
@@ -3922,7 +3931,7 @@ function AdminStudentCalculationsModal({ student, adminProfile, expectedCount, o
         <header className="admin-calculations-header">
           <div>
             <h2>Cálculos de {fullName(student)}</h2>
-            <p>{student.email || 'Sin correo'} · {total} cálculo{Number(total) === 1 ? '' : 's'} guardado{Number(total) === 1 ? '' : 's'}</p>
+            <p>{student.email || 'Sin correo'} · {totalLabel}</p>
           </div>
           <button type="button" aria-label="Cerrar" onClick={onClose}>×</button>
         </header>
