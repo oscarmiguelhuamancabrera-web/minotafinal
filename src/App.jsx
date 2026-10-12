@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createWorker } from 'tesseract.js'
 import { REMEMBER_SESSION_KEY, supabase } from './lib/supabase'
 import { parseGradeText } from './utils/ocr'
+import { ThemeSelector } from './components/ThemeProvider'
 import {
   DEFAULT_SETTINGS,
   EVALUATIONS,
@@ -2665,6 +2666,7 @@ function Welcome({ onLogin, onRegister, onGuest, onGoogle, onMicrosoft }) {
         <button className="btn ghost" onClick={onRegister}>Crear cuenta</button>
         <button className="btn link" onClick={onGuest}>Continuar como invitado</button>
       </div>
+      <ThemeSelector />
       <Footer />
     </section>
   )
@@ -2875,6 +2877,7 @@ function AuthCard({ title, children, onBack, className = '' }) {
       <img className="mini-logo" src="/logo.png" alt="Mi Nota Final" />
       <h1>{title}</h1>
       <div className="stack">{children}</div>
+      <ThemeSelector />
       <Footer />
     </section>
   )
@@ -2891,6 +2894,7 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
             <span>{guestMode ? 'Modo invitado' : `Hola, ${firstWord(profile?.first_name || profile?.full_name)}`}</span>
           </div>
         </div>
+        <ThemeSelector compact />
         <nav className="desktop-nav">
           {!guestMode && <button className={screen === 'dashboard' ? 'active' : ''} onClick={() => setScreen('dashboard')}>Inicio</button>}
           {!guestMode && <button className={screen === 'courses' ? 'active' : ''} onClick={() => setScreen('courses')}>Cursos</button>}
@@ -3469,6 +3473,7 @@ function SettingsScreen({ settings, guestMode, isAdmin, profile, evaluationTempl
   return (
     <div className="page fade-in">
       <Header title={title} subtitle={subtitle} />
+      <Card><ThemeSelector /></Card>
       <Card>
         {allowTemplateSelection && (
           <>

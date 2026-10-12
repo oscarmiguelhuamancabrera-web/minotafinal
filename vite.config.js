@@ -9,7 +9,7 @@ export default defineConfig({
       // Una versión nueva se aplicará al volver a abrir la app, sin recargar
       // automáticamente la pantalla mientras el usuario está trabajando.
       registerType: 'prompt',
-      includeAssets: ['favicon.png', 'logo.png', 'icon-192.png', 'icon-512.png'],
+      includeAssets: ['favicon.png', 'logo.png', 'icon-192.png', 'icon-512.png', 'theme-init.js'],
       manifest: {
         name: 'Mi Nota Final',
         short_name: 'Mi Nota Final',

@@ -1,0 +1,95 @@
+/* Los fallbacks en styles.css conservan cada color original del modo claro.
+   Estos tokens describen roles visuales y se heredan en todas las pantallas. */
+:root { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --purple: #a78bfa;
+  --purple-dark: #c4b5fd;
+  --purple-soft: #30284b;
+  --purple-border: #594875;
+  --ink: #f5f3ff;
+  --muted: #b8b6d0;
+  --surface: #202137;
+  --bg: #0f1020;
+  --green: #4ade80;
+  --orange: #fbbf24;
+  --red: #fb7185;
+  --shadow: 0 20px 55px rgba(0, 0, 0, .3);
+  --shadow-local: 0 12px 32px rgba(0, 0, 0, .24);
+  --focus-ring: 0 0 0 4px rgba(167, 139, 250, .28);
+  --page-start: #17182b;
+  --surface-glass: rgba(32, 33, 55, .96);
+  --surface-subtle: #17182b;
+  --surface-accent: #30284b;
+  --surface-disabled: #1c1d30;
+  --border: #373852;
+  --border-glass: #373852;
+  --control-bg: #25263d;
+  --control-border: #74738b;
+  --accent-text: #c4b5fd;
+  --accent-border: #594875;
+  --accent-wash: rgba(167, 139, 250, .12);
+  --text-primary: #f5f3ff;
+  --text-secondary: #b8b6d0;
+  --text-disabled: #a8a5be;
+  --on-brand: #f5f3ff;
+  --brand-start: #6d28d9;
+  --brand-end: #7c3aed;
+  --activity-start: #a78bfa;
+  --activity-end: #c4b5fd;
+  --success-bg: #15382b;
+  --success-text: #86efac;
+  --success-border: #2b7953;
+  --warning-bg: #3b2d1b;
+  --warning-text: #fcd34d;
+  --warning-border: #8e7033;
+  --error-bg: #422333;
+  --error-text: #fda4af;
+  --error-border: #925369;
+  --info-bg: #202f4d;
+  --info-text: #93c5fd;
+  --info-border: #476c9b;
+  --neutral-bg: #373852;
+  --scrollbar-thumb: #8b72bf;
+  --modal-header: #30234f;
+  --media-bg: #17182b;
+  --backdrop: rgba(8, 8, 20, .75);
+  --tour-focus: #fcd34d;
+}
+
+.input { background: var(--control-bg, var(--surface)); }
+.input:focus { box-shadow: var(--focus-ring, 0 0 0 4px rgba(124, 58, 237, .09)); }
+.input::placeholder { color: var(--text-secondary, #757575); opacity: 1; }
+button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--purple);
+  outline-offset: 3px;
+}
+:root[data-theme="dark"] a { color: var(--purple-dark); }
+:root[data-theme="dark"] .input:disabled { border-color: var(--border); }
+/* El logo se conserva sobre una base clara; no se filtra ni recolorea. */
+:root[data-theme="dark"] :is(.brand-logo, .mini-logo, .brand-inline img, .splash img) {
+  background: #fff;
+  border-radius: 14px;
+}
+
+.theme-selector {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  text-align: left;
+  min-width: 0;
+  color: var(--purple-dark);
+  font-size: .86rem;
+  font-weight: 800;
+}
+.theme-selector .input { min-width: 0; }
+.theme-selector.compact { margin-top: 0; flex-shrink: 0; width: 132px; font-size: .75rem; gap: 3px; }
+.theme-selector.compact .input { padding: 8px 10px; border-radius: 12px; font-size: .85rem; }
+@media (max-width: 820px) {
+  .theme-selector.compact { width: 112px; }
+  .topbar .brand-inline { min-width: 0; flex: 1; }
+  .topbar .brand-inline strong { overflow-wrap: anywhere; }
+}
+@media (max-width: 360px) {
+  .topbar { flex-wrap: wrap; }
+}
