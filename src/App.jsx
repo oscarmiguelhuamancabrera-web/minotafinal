@@ -710,7 +710,7 @@ function App() {
   const [guestMode, setGuestMode] = useState(false)
   const [notice, setNotice] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [initializationPhase, setInitializationPhase] = useState('Verificando sesión...')
+  const [initializationPhase, setInitializationPhase] = useState('Iniciando Mi Nota Final...')
   const [initializationError, setInitializationError] = useState('')
   const [gradeLoadStatus, setGradeLoadStatus] = useState('idle')
   const [gradeSaveStatus, setGradeSaveStatus] = useState('idle')
@@ -830,9 +830,10 @@ function App() {
     initializationRef.current = true
     setLoading(true)
     setInitializationError('')
-    setInitializationPhase('Cargando configuración...')
+    setInitializationPhase('Iniciando Mi Nota Final...')
 
     try {
+      setInitializationPhase('Cargando configuración...')
       const catalogResults = await Promise.allSettled([
         withTimeout(loadUniversities(), INITIALIZATION_TIMEOUT_MS, 'La configuración'),
         withTimeout(loadFaculties(), INITIALIZATION_TIMEOUT_MS, 'La configuración'),
@@ -851,7 +852,7 @@ function App() {
       const nextSession = sessionResult?.data?.session || null
       setSession(nextSession)
       if (nextSession?.user) {
-        setInitializationPhase('Preparando tus datos...')
+        setInitializationPhase('Preparando tu espacio académico...')
         await withTimeout(loadProfileAndData(nextSession.user), INITIALIZATION_TIMEOUT_MS, 'Tus datos')
       }
     } catch (error) {
@@ -1113,6 +1114,7 @@ function App() {
     setInitializationError('')
 
     if (isProfileIncomplete(normalizedNameProfile)) {
+      setInitializationPhase('Preparando tu perfil...')
       await loadSettings(user.id)
       setScreen('complete-profile')
       return
@@ -1122,12 +1124,15 @@ function App() {
     // Antes, si el perfil admin ya existía, las sugerencias podían guardarse en BD
     // pero no aparecer en el panel del superadmin hasta otra recarga/cambio interno.
     if (isAdminRole(normalizedNameProfile.role)) {
+      setInitializationPhase('Preparando tu espacio administrativo...')
       await loadSettings(user.id)
       await loadAdminData()
     } else {
+      setInitializationPhase('Recuperando tus cursos...')
       await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id)])
       await loadUserCommunication(normalizedNameProfile)
 
+      setInitializationPhase('Preparando tus calificaciones...')
       const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
       const defaultTemplate = findBestTemplateForContext(normalizedNameProfile, null, templates)
       if (defaultTemplate?.id) await applyEvaluationTemplate(defaultTemplate.id)
@@ -2637,8 +2642,11 @@ function App() {
 function Splash({ phase = 'Verificando sesión...' }) {
   return (
     <div className="splash" role="status" aria-live="polite">
-      <img src="/logo.png" alt="Mi Nota Final" />
-      <p>{phase}</p>
+      <div className="splash-logo-shell">
+        <img src="/logo.png" alt="Mi Nota Final" />
+      </div>
+      <p key={phase} className="splash-message"><span>{phase}</span><span className="splash-dots" aria-hidden="true">...</span></p>
+      <div className="splash-progress" aria-hidden="true"><span /></div>
       <small>Tus datos se conservan mientras terminamos de preparar la aplicación.</small>
     </div>
   )

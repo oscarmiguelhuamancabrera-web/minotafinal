@@ -28,10 +28,27 @@ button { cursor: pointer; }
 
 .app-shell { min-height: 100vh; }
 .app-container { max-width: 1160px; margin: 0 auto; padding: 24px; }
-.splash { min-height: 100vh; display: grid; place-items: center; align-content: center; text-align: center; gap: 12px; padding: 24px; }
-.splash img { width: 140px; border-radius: 30px; }
-.splash p { margin: 0; color: var(--purple-dark); font-weight: 900; }
+.splash { min-height: 100vh; display: grid; place-items: center; align-content: center; text-align: center; gap: 14px; padding: 24px; }
+.splash-logo-shell { position: relative; display: grid; place-items: center; animation: splash-fade-in .7s ease both, splash-float 3.8s ease-in-out .7s infinite; }
+.splash-logo-shell::before { content: ''; position: absolute; inset: 8px; z-index: -1; border-radius: 38%; background: rgba(124, 58, 237, .28); filter: blur(24px); animation: splash-glow 2.8s ease-in-out infinite; }
+.splash img { display: block; width: 140px; border-radius: 30px; }
+.splash-message { display: flex; align-items: baseline; justify-content: center; min-height: 26px; margin: 0; color: var(--purple-dark); font-weight: 900; animation: splash-fade-in .5s ease both; }
+.splash-dots { display: inline-block; width: 22px; overflow: hidden; text-align: left; animation: splash-dots 1.35s steps(4, end) infinite; }
+.splash-progress { position: relative; width: min(78vw, 280px); height: 8px; overflow: hidden; border-radius: 999px; background: rgba(124, 58, 237, .14); }
+.splash-progress span { position: absolute; inset: 0 auto 0 -42%; width: 42%; border-radius: inherit; background: linear-gradient(90deg, #7c3aed, #a855f7, #c084fc); box-shadow: 0 0 14px rgba(124, 58, 237, .35); animation: splash-progress 1.8s ease-in-out infinite; }
 .splash small { max-width: 320px; color: var(--muted); }
+
+@keyframes splash-fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes splash-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@keyframes splash-glow { 0%, 100% { opacity: .55; transform: scale(.92); } 50% { opacity: .9; transform: scale(1.08); } }
+@keyframes splash-dots { 0% { width: 0; } 25% { width: 7px; } 50% { width: 14px; } 75%, 100% { width: 22px; } }
+@keyframes splash-progress { from { transform: translateX(0); } to { transform: translateX(340%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-logo-shell, .splash-logo-shell::before, .splash-message, .splash-dots, .splash-progress span { animation: none; }
+  .splash-logo-shell, .splash-logo-shell::before { opacity: 1; transform: none; }
+  .splash-progress span { left: 0; width: 100%; opacity: .65; }
+}
 
 .initialization-error {
   position: fixed;

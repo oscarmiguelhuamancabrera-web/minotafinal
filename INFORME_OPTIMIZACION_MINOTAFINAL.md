@@ -13,6 +13,14 @@ Rama: `codex/optimizacion-estabilidad`
 
 ## Correcciones implementadas
 
+### Pantalla de carga animada
+
+- El logotipo oficial conserva su imagen, proporciones y colores; ahora tiene entrada suave, flotación vertical discreta y resplandor violeta.
+- La pantalla muestra estados vinculados a la inicialización real: configuración, sesión, perfil, espacio académico, cursos y preparación de calificaciones.
+- Se añadió una barra de progreso indeterminada con degradado violeta y puntos suspensivos animados, sin porcentajes ficticios ni retrasos artificiales.
+- Se respeta `prefers-reduced-motion`, desactivando las animaciones y conservando un indicador estático.
+- La pantalla desaparece cuando termina la inicialización y conserva el reintento existente cuando ocurre un error.
+
 ### Carga inicial y autenticación
 
 - Se añadieron etapas visibles: “Cargando configuración…”, “Verificando sesión…” y “Preparando tus datos…”.
