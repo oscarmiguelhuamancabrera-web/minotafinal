@@ -649,11 +649,7 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
 .social-button:hover { background: var(--surface-subtle, #f9fafb); border-color: var(--border, #d1d5db); transform: translateY(-1px); }
 .social-button > span:nth-child(2) { text-align: center; }
 .social-icon { display: flex; align-items: center; justify-content: center; font-weight: 900; }
-.google-icon {
-  font-family: Arial, sans-serif;
-  font-size: 19px;
-  color: #4285f4;
-}
+.social-icon img { display: block; width: 18px; height: 18px; object-fit: contain; }
 .microsoft-icon {
   width: 18px;
   height: 18px;
@@ -662,11 +658,6 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   grid-template-rows: 1fr 1fr;
   gap: 2px;
 }
-.microsoft-icon i { display: block; border-radius: 1px; }
-.microsoft-icon i:nth-child(1) { background: #f25022; }
-.microsoft-icon i:nth-child(2) { background: #7fba00; }
-.microsoft-icon i:nth-child(3) { background: #00a4ef; }
-.microsoft-icon i:nth-child(4) { background: #ffb900; }
 .inline-new-course {
   margin-top: 12px;
   display: grid;

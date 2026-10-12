@@ -9,6 +9,13 @@ Rama: `codex/optimizacion-estabilidad`
 - `src/components/ThemeProvider.jsx` mantiene la preferencia en React y escucha cambios de `localStorage`, del sistema operativo y de otras pestañas.
 - `src/themes.css` contiene la paleta oscura y tokens semánticos. `src/styles.css` conserva los valores originales del tema claro como fallback y usa esos tokens en superficies, textos, controles, bordes y estados.
 - La preferencia se guarda en `localStorage` con la clave `mnf:appearance`. Las opciones son `auto`, `light` y `dark`; el valor inicial es `auto`.
+- `ThemeFloatingButton` vive dentro de `ThemeProvider`, por lo que aparece una sola vez en todas las pantallas, incluidas autenticación, portal estudiantil, portal administrativo y estados de carga.
+
+## Botón flotante y logotipos de autenticación
+
+- Se reemplazaron los selectores desplegables de apariencia por un botón circular fijo de 46–48 px, con menú encima, selección activa, cierre al hacer clic fuera y cierre con Escape.
+- El botón respeta el área segura móvil, queda por debajo de modales críticos y funciona con mouse, teclado y toque.
+- Google y Microsoft ahora usan SVG locales (`public/google-g.svg` y `public/microsoft.svg`) con sus colores oficiales, sin emojis ni servicios externos. Los flujos OAuth permanecen sin cambios.
 
 ## Selector y cobertura
 

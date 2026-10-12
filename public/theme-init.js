@@ -29,6 +29,7 @@
     key,
     media,
     getPreference: () => preference,
+    getTheme: () => document.documentElement.dataset.theme || 'light',
     refresh: () => apply(readPreference()),
     setPreference(value) {
       apply(value)
