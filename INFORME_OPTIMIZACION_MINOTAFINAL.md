@@ -37,11 +37,17 @@ Rama: `codex/optimizacion-estabilidad`
 - Se implementó un adaptador de almacenamiento de Supabase Auth: `localStorage` cuando está activada y `sessionStorage` cuando está desactivada.
 - No se almacenan contraseñas ni se duplican tokens. El cierre de sesión elimina ambos almacenamientos.
 
+### Compatibilidad de Vercel
+
+- Vercel dejó de aceptar el runtime `20.x`. Se actualizó `package.json` y `package-lock.json` a `Node.js 24.x` para permitir el Preview de la rama.
+
 ### Archivos modificados
 
 - `src/App.jsx`
 - `src/lib/supabase.js`
 - `src/styles.css`
+- `package.json`
+- `package-lock.json`
 - `INFORME_OPTIMIZACION_MINOTAFINAL.md`
 
 ## Validación ejecutada
