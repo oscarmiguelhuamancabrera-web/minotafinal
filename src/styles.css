@@ -1024,8 +1024,8 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
 }
 
 .floating-announcement {
-  width: min(92vw, 620px);
-  max-height: 92vh;
+  width: min(94vw, 760px);
+  max-height: 94vh;
   overflow: hidden;
   border-radius: 22px;
   background: var(--surface, #fff);
@@ -1034,11 +1034,16 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
 }
 
 .floating-announcement.image-mode {
-  width: min(92vw, 600px);
+  width: min(94vw, 760px);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
   background: var(--media-bg, #111827);
 }
+.floating-announcement.text-mode { display: flex; flex-direction: column; }
 
 .floating-announcement-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1059,15 +1064,28 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   padding: 0 4px;
 }
 
+.floating-announcement-image-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--media-bg, #111827);
+}
+
 .floating-announcement-image {
   display: block;
   width: 100%;
-  max-height: calc(92vh - 56px);
+  height: auto;
+  max-width: none;
   object-fit: contain;
   background: var(--media-bg, #111827);
 }
 
 .floating-announcement-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 26px;
   display: grid;
   gap: 14px;
@@ -1254,9 +1272,12 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
     align-items: center;
   }
   .floating-announcement {
-    width: 96vw;
+    width: 94vw;
+    max-height: 94vh;
     border-radius: 18px;
   }
+  .floating-announcement.image-mode { width: 94vw; max-height: 94vh; }
+  .floating-announcement-image-scroll { max-height: calc(94vh - 58px); }
   .floating-announcement-body {
     padding: 18px;
   }

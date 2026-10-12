@@ -3643,7 +3643,9 @@ function FloatingAnnouncementModal({ announcement, onClose }) {
           <button type="button" aria-label="Cerrar anuncio" onClick={onClose}>×</button>
         </div>
         {isImage ? (
-          <img className="floating-announcement-image" src={announcement.modal_image_url} alt={announcement.title} />
+          <div className="floating-announcement-image-scroll">
+            <img className="floating-announcement-image" src={announcement.modal_image_url} alt={announcement.title} />
+          </div>
         ) : (
           <div className="floating-announcement-body">
             <span className={`badge ${announcement.priority || 'normal'}`}>{announcement.priority === 'high' ? 'Importante' : 'Aviso'}</span>

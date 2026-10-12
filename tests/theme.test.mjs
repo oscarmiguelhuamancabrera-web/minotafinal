@@ -123,3 +123,13 @@ test('el botón flotante es global y los logotipos OAuth son recursos SVG locale
   assert.match(fs.readFileSync(new URL('../public/google-g.svg', import.meta.url), 'utf8'), /#4285F4/)
   assert.match(fs.readFileSync(new URL('../public/microsoft.svg', import.meta.url), 'utf8'), /#F25022/)
 })
+
+test('el modal del flyer usa un área de imagen amplia con scroll interno', () => {
+  const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+  assert.match(app, /floating-announcement-image-scroll/)
+  assert.match(css, /\.floating-announcement-image-scroll[\s\S]*overflow-y: auto/)
+  assert.match(css, /\.floating-announcement-image[\s\S]*width: 100%[\s\S]*height: auto/)
+  assert.match(css, /\.floating-announcement\.image-mode[\s\S]*width: min\(94vw, 760px\)/)
+  assert.match(css, /\.floating-announcement-header[\s\S]*flex: 0 0 auto/)
+})
