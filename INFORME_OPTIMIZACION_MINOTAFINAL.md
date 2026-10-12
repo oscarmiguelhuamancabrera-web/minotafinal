@@ -40,6 +40,7 @@ Rama: `codex/optimizacion-estabilidad`
 ### Compatibilidad de Vercel
 
 - Vercel dejó de aceptar el runtime `20.x`. Se actualizó `package.json` y `package-lock.json` a `Node.js 24.x` para permitir el Preview de la rama.
+- Se corrigieron 406 referencias del `package-lock.json` que apuntaban a un registro interno inaccesible. Todas usan ahora `https://registry.npmjs.org/`.
 
 ### Archivos modificados
 
