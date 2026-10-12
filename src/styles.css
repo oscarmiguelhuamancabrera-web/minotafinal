@@ -28,8 +28,30 @@ button { cursor: pointer; }
 
 .app-shell { min-height: 100vh; }
 .app-container { max-width: 1160px; margin: 0 auto; padding: 24px; }
-.splash { min-height: 100vh; display: grid; place-items: center; text-align: center; gap: 12px; }
+.splash { min-height: 100vh; display: grid; place-items: center; align-content: center; text-align: center; gap: 12px; padding: 24px; }
 .splash img { width: 140px; border-radius: 30px; }
+.splash p { margin: 0; color: var(--purple-dark); font-weight: 900; }
+.splash small { max-width: 320px; color: var(--muted); }
+
+.initialization-error {
+  position: fixed;
+  z-index: 45;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92vw, 680px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 16px;
+  background: #fff7ed;
+  color: #9a3412;
+  box-shadow: var(--shadow);
+  font-weight: 700;
+}
 
 .toast {
   position: fixed;
@@ -104,6 +126,26 @@ p { color: var(--muted); line-height: 1.5; }
 .input.grade { text-align: center; font-weight: 900; font-size: 1.18rem; }
 .label { display: block; font-size: .85rem; font-weight: 900; color: var(--purple-dark); margin-bottom: 8px; }
 .hint { font-size: .88rem; color: var(--muted); }
+.checkbox-row { display: flex; align-items: center; justify-content: flex-start; gap: 9px; color: var(--muted); font-size: .9rem; font-weight: 700; text-align: left; }
+.checkbox-row input { width: 17px; height: 17px; accent-color: var(--purple); }
+
+.grade-sync-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  margin: 12px 0;
+  padding: 9px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: .84rem;
+  font-weight: 800;
+}
+.grade-sync-status:empty { display: none; }
+.grade-sync-status.error { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
 
 .layout { min-height: calc(100vh - 48px); }
 .topbar {

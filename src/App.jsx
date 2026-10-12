@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createWorker } from 'tesseract.js'
-import { supabase } from './lib/supabase'
+import { REMEMBER_SESSION_KEY, supabase } from './lib/supabase'
 import { parseGradeText } from './utils/ocr'
 import {
   DEFAULT_SETTINGS,
@@ -642,6 +642,49 @@ function getErrorMessage(error) {
   return message ? `Ocurrió un error: ${message}` : 'Ocurrió un error inesperado.'
 }
 
+const GRADE_DRAFT_PREFIX = 'mnf:grade-draft:'
+const INITIALIZATION_TIMEOUT_MS = 12000
+
+function withTimeout(promise, timeoutMs, label = 'La solicitud') {
+  let timeoutId
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(`${label} tardó demasiado.`)), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId))
+}
+
+function gradeDraftKey(userId, courseId) {
+  return `${GRADE_DRAFT_PREFIX}${userId}:${courseId}`
+}
+
+function readGradeDraft(userId, courseId) {
+  if (!userId || !courseId) return null
+  try {
+    const raw = window.localStorage.getItem(gradeDraftKey(userId, courseId))
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function writeGradeDraft(userId, courseId, grades) {
+  if (!userId || !courseId) return
+  try {
+    window.localStorage.setItem(gradeDraftKey(userId, courseId), JSON.stringify({ grades, updatedAt: Date.now() }))
+  } catch {
+    // El guardado remoto sigue siendo la fuente principal si el almacenamiento local no está disponible.
+  }
+}
+
+function clearGradeDraft(userId, courseId) {
+  if (!userId || !courseId) return
+  try {
+    window.localStorage.removeItem(gradeDraftKey(userId, courseId))
+  } catch {
+    // Ignorar errores de almacenamiento del navegador.
+  }
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -667,13 +710,43 @@ function App() {
   const [guestMode, setGuestMode] = useState(false)
   const [notice, setNotice] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [initializationPhase, setInitializationPhase] = useState('Verificando sesión...')
+  const [initializationError, setInitializationError] = useState('')
+  const [gradeLoadStatus, setGradeLoadStatus] = useState('idle')
+  const [gradeSaveStatus, setGradeSaveStatus] = useState('idle')
+  const [gradeSaveError, setGradeSaveError] = useState('')
   const [guidedTourStep, setGuidedTourStep] = useState(null)
   const recordedLoginRef = useRef('')
   const screenRef = useRef(screen)
+  const initializationRef = useRef(false)
+  const profileLoadPromiseRef = useRef(null)
+  const authGenerationRef = useRef(0)
+  const courseGradesRequestRef = useRef(0)
+  const gradesHydratedRef = useRef(false)
+  const autosaveTimerRef = useRef(null)
+  const autosaveRevisionRef = useRef(0)
+  const pendingGradeSaveRef = useRef(null)
+  const savingGradesRef = useRef(false)
 
   useEffect(() => {
     screenRef.current = screen
   }, [screen])
+
+  useEffect(() => {
+    const persistPendingDraft = () => {
+      const pending = pendingGradeSaveRef.current
+      if (pending && session?.user?.id) writeGradeDraft(session.user.id, pending.courseId, pending.grades)
+      if (document.visibilityState === 'hidden') flushPendingGradeSave()
+    }
+    document.addEventListener('visibilitychange', persistPendingDraft)
+    window.addEventListener('pagehide', persistPendingDraft)
+    return () => {
+      document.removeEventListener('visibilitychange', persistPendingDraft)
+      window.removeEventListener('pagehide', persistPendingDraft)
+    }
+    // La función usa refs para leer siempre la edición más reciente.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id])
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin'
   const activeCourse = courses.find((course) => course.id === selectedCourseId) || null
@@ -714,8 +787,11 @@ function App() {
   }
 
   useEffect(() => {
-    initialize()
+    let mounted = true
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (!mounted) return
+      // INITIAL_SESSION se procesa una sola vez dentro de initialize().
+      if (event === 'INITIAL_SESSION') return
       setSession(newSession)
 
       // Supabase renueva el token periódicamente para mantener la sesión activa.
@@ -724,8 +800,14 @@ function App() {
 
       setGuestMode(false)
       if (newSession?.user) {
-        await loadProfileAndData(newSession.user)
+        try {
+          await loadProfileAndData(newSession.user)
+        } catch (error) {
+          console.error('No se pudo preparar la sesión:', error)
+          setInitializationError('No se pudieron preparar tus datos. Puedes reintentar sin perder tus calificaciones.')
+        }
       } else {
+        authGenerationRef.current += 1
         setProfile(null)
         setCourses([])
         setAvailableCourses([])
@@ -734,19 +816,52 @@ function App() {
         if (!guestMode) setScreen('login')
       }
     })
-    return () => listener?.subscription?.unsubscribe()
+    initialize()
+    return () => {
+      mounted = false
+      listener?.subscription?.unsubscribe()
+      if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function initialize() {
+    if (initializationRef.current) return
+    initializationRef.current = true
     setLoading(true)
-    await Promise.all([loadUniversities(), loadFaculties(), loadCareers(), loadCycles(), loadEvaluationTemplates()])
-    const { data } = await supabase.auth.getSession()
-    setSession(data.session)
-    if (data.session?.user) {
-      await loadProfileAndData(data.session.user)
+    setInitializationError('')
+    setInitializationPhase('Cargando configuración...')
+
+    try {
+      const catalogResults = await Promise.allSettled([
+        withTimeout(loadUniversities(), INITIALIZATION_TIMEOUT_MS, 'La configuración'),
+        withTimeout(loadFaculties(), INITIALIZATION_TIMEOUT_MS, 'La configuración'),
+        withTimeout(loadCareers(), INITIALIZATION_TIMEOUT_MS, 'La configuración'),
+        withTimeout(loadCycles(), INITIALIZATION_TIMEOUT_MS, 'La configuración'),
+        withTimeout(loadEvaluationTemplates(), INITIALIZATION_TIMEOUT_MS, 'Las plantillas')
+      ])
+      const catalogFailures = catalogResults.filter((result) => result.status === 'rejected')
+      if (catalogFailures.length) {
+        console.error('Fallos de configuración durante el inicio:', catalogFailures)
+        setInitializationError('Parte de la configuración no pudo cargarse. Puedes reintentar sin perder tus datos.')
+      }
+
+      setInitializationPhase('Verificando sesión...')
+      const sessionResult = await withTimeout(supabase.auth.getSession(), INITIALIZATION_TIMEOUT_MS, 'La sesión')
+      const nextSession = sessionResult?.data?.session || null
+      setSession(nextSession)
+      if (nextSession?.user) {
+        setInitializationPhase('Preparando tus datos...')
+        await withTimeout(loadProfileAndData(nextSession.user), INITIALIZATION_TIMEOUT_MS, 'Tus datos')
+      }
+    } catch (error) {
+      console.error('Error de inicialización:', error)
+      setInitializationError('No se pudo completar la carga inicial. Revisa tu conexión e inténtalo nuevamente.')
+      setSession(null)
+    } finally {
+      initializationRef.current = false
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   function notify(type, message) {
@@ -878,11 +993,28 @@ function App() {
   }
 
   async function loadProfileAndData(user) {
+    if (!user?.id) return
+    const current = profileLoadPromiseRef.current
+    if (current?.userId === user.id) return current.promise
+
+    const generation = authGenerationRef.current
+    const promise = loadProfileAndDataInternal(user, generation)
+    profileLoadPromiseRef.current = { userId: user.id, promise }
+    try {
+      return await promise
+    } finally {
+      if (profileLoadPromiseRef.current?.promise === promise) profileLoadPromiseRef.current = null
+    }
+  }
+
+  async function loadProfileAndDataInternal(user, generation) {
     const { data: userProfile, error } = await supabase
       .from('profiles')
       .select('*, university:universities(id,name,code), faculty:faculties(id,name), career:careers(id,name,faculty_id), cycle:cycles(id,name,order_number)')
       .eq('id', user.id)
       .single()
+
+    if (generation !== authGenerationRef.current) return
 
     if (error || !userProfile) {
       const provisionalProfile = buildProfileFromAuthUser(user)
@@ -976,7 +1108,9 @@ function App() {
       }).eq('id', userProfile.id)
     }
 
+    if (generation !== authGenerationRef.current) return
     setProfile(normalizedNameProfile)
+    setInitializationError('')
 
     if (isProfileIncomplete(normalizedNameProfile)) {
       await loadSettings(user.id)
@@ -1211,14 +1345,132 @@ function App() {
     if (!error) setHistory(data || [])
   }
 
+  async function persistGradesForCourse(courseId, gradeValues, items, template, course = null) {
+    if (!session?.user?.id || !courseId) return new Error('No hay una sesión activa para guardar las calificaciones.')
+    const normalized = normalizeGradesForDb(gradeValues)
+    if (template?.id && items.some((item) => item.id)) {
+      const scoreRows = items
+        .filter((item) => item.id)
+        .map((item) => ({
+          user_id: session.user.id,
+          course_id: courseId,
+          student_course_id: course?.student_course_id || null,
+          evaluation_template_id: template.id,
+          evaluation_component_id: item.id,
+          score: toNumber(gradeValues[item.key]),
+          updated_at: new Date().toISOString()
+        }))
+      if (scoreRows.length) {
+        const { error } = await supabase
+          .from('student_evaluation_scores')
+          .upsert(scoreRows, { onConflict: 'user_id,course_id,evaluation_component_id' })
+        if (error) return error
+      }
+      return null
+    }
+
+    const { error } = await supabase.from('course_grades').upsert({
+      user_id: session.user.id,
+      course_id: courseId,
+      ...normalized
+    }, { onConflict: 'user_id,course_id' })
+    return error || null
+  }
+
+  async function flushPendingGradeSave() {
+    if (savingGradesRef.current || !pendingGradeSaveRef.current) return null
+    const pending = pendingGradeSaveRef.current
+    savingGradesRef.current = true
+    setGradeSaveStatus('saving')
+    setGradeSaveError('')
+    const error = await persistGradesForCourse(pending.courseId, pending.grades, pending.items, pending.template, pending.course)
+    savingGradesRef.current = false
+
+    if (error) {
+      setGradeSaveStatus('error')
+      setGradeSaveError(getErrorMessage(error))
+      return error
+    }
+
+    if (pendingGradeSaveRef.current?.revision === pending.revision) {
+      clearGradeDraft(session?.user?.id, pending.courseId)
+      pendingGradeSaveRef.current = null
+      setGradeSaveStatus('saved')
+    } else if (pendingGradeSaveRef.current) {
+      // Mientras se guardaba llegó otra edición; se vuelve a enviar únicamente
+      // la versión más reciente para que una respuesta antigua nunca la tape.
+      setGradeSaveStatus('pending')
+      return flushPendingGradeSave()
+    }
+    return null
+  }
+
+  function queueGradeSave(courseId, nextGrades, items = evaluationItems, template = evaluationTemplate, course = activeCourse) {
+    if (!session?.user?.id || !courseId || !gradesHydratedRef.current) return
+    const revision = autosaveRevisionRef.current + 1
+    autosaveRevisionRef.current = revision
+    writeGradeDraft(session.user.id, courseId, nextGrades)
+    pendingGradeSaveRef.current = { revision, courseId, grades: nextGrades, items, template, course }
+    setGradeSaveStatus('pending')
+    setGradeSaveError('')
+    if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current)
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null
+      flushPendingGradeSave()
+    }, 700)
+  }
+
+  function handleGradeChange(key, value) {
+    const next = { ...grades, [key]: value }
+    setGrades(next)
+    queueGradeSave(selectedCourseId, next)
+    setResult(null)
+  }
+
+  function handleExtractedGrades(nextGrades) {
+    const next = { ...grades, ...nextGrades }
+    setGrades(next)
+    queueGradeSave(selectedCourseId, next)
+    setResult(null)
+  }
+
+  async function retryGradeSave() {
+    if (pendingGradeSaveRef.current) return flushPendingGradeSave()
+    if (!selectedCourseId || !session?.user?.id) return null
+    setGradeSaveStatus('saving')
+    const error = await persistGradesForCourse(selectedCourseId, grades, evaluationItems, evaluationTemplate, activeCourse)
+    if (error) {
+      setGradeSaveStatus('error')
+      setGradeSaveError(getErrorMessage(error))
+      return error
+    }
+    clearGradeDraft(session.user.id, selectedCourseId)
+    setGradeSaveStatus('saved')
+    setGradeSaveError('')
+    return null
+  }
+
   async function loadCourseGrades(courseId) {
+    const pendingError = await flushPendingGradeSave()
+    if (pendingError) {
+      notify('error', 'Hay una calificación pendiente de sincronización. Revisa tu conexión y reintenta.')
+      return
+    }
+    const requestId = courseGradesRequestRef.current + 1
+    courseGradesRequestRef.current = requestId
     setSelectedCourseId(courseId)
     setResult(null)
+    setGradeLoadStatus(courseId ? 'loading' : 'idle')
+    setGradeSaveStatus('idle')
+    setGradeSaveError('')
+    gradesHydratedRef.current = false
     if (!session?.user || !courseId) {
       const fallback = normalizeEvaluationComponents([], settings)
       setEvaluationTemplate(null)
       setEvaluationItems(fallback)
       setGrades(emptyDynamicGrades(fallback))
+      setGradeLoadStatus('ready')
+      gradesHydratedRef.current = true
       return
     }
 
@@ -1246,6 +1498,7 @@ function App() {
       template = data || null
     }
 
+    const draft = readGradeDraft(session.user.id, courseId)
     if (template?.id) {
       const { data: components, error: compError } = await supabase
         .from('evaluation_components')
@@ -1255,6 +1508,7 @@ function App() {
         .order('component_order')
 
       const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(components || [], settings)
+      if (requestId !== courseGradesRequestRef.current) return
       setEvaluationTemplate(template)
       setEvaluationItems(items)
 
@@ -1270,9 +1524,14 @@ function App() {
           const item = items.find((it) => it.id === row.evaluation_component_id)
           if (item) next[item.key] = row.score ?? ''
         })
+        if (draft?.grades && typeof draft.grades === 'object') Object.assign(next, draft.grades)
+        if (requestId !== courseGradesRequestRef.current) return
         setGrades(next)
+        setGradeLoadStatus('ready')
+        gradesHydratedRef.current = true
         return
       }
+      console.error('No se pudieron recuperar las calificaciones configurables:', scoreError)
     }
 
     // Fallback de compatibilidad con la tabla antigua course_grades.
@@ -1286,16 +1545,33 @@ function App() {
       .eq('user_id', session.user.id)
       .maybeSingle()
     if (!error && data) {
+      if (requestId !== courseGradesRequestRef.current) return
       setGrades({
         pc1: data.pc1 ?? '',
         pc2: data.pc2 ?? '',
         pc3: data.pc3 ?? '',
         pc4: data.pc4 ?? '',
         partial_exam: data.partial_exam ?? '',
-        final_exam: data.final_exam ?? ''
+        final_exam: data.final_exam ?? '',
+        ...draft?.grades
       })
-    } else {
+      setGradeLoadStatus('ready')
+      gradesHydratedRef.current = true
+    } else if (!error && !data) {
+      if (requestId !== courseGradesRequestRef.current) return
       setGrades(emptyDynamicGrades(fallbackItems))
+      if (draft?.grades && typeof draft.grades === 'object') setGrades((current) => ({ ...current, ...draft.grades }))
+      setGradeLoadStatus('ready')
+      gradesHydratedRef.current = true
+    } else {
+      // Una consulta fallida no significa que el curso no tenga notas. Conserva
+      // el borrador local y los valores visibles para evitar una pantalla vacía.
+      if (requestId !== courseGradesRequestRef.current) return
+      if (draft?.grades && typeof draft.grades === 'object') setGrades((current) => ({ ...current, ...draft.grades }))
+      else setGrades(emptyDynamicGrades(fallbackItems))
+      setGradeLoadStatus('error')
+      setGradeSaveStatus('error')
+      setGradeSaveError(getErrorMessage(error))
     }
   }
 
@@ -1338,10 +1614,18 @@ function App() {
     setScreen('login')
   }
 
-  async function handleLogin(email, password) {
+  async function handleLogin(email, password, rememberSession) {
     if (!email.trim() || !password) {
       notify('error', 'Ingresa tu correo y contraseña para iniciar sesión.')
       return
+    }
+    try {
+      window.localStorage.setItem(REMEMBER_SESSION_KEY, rememberSession ? 'true' : 'false')
+      // El adaptador de Auth moverá el token nuevo al almacenamiento elegido.
+      // Limpiamos la sesión anterior para evitar reutilizar una preferencia distinta.
+      await supabase.auth.signOut()
+    } catch {
+      // Si no se puede limpiar el almacenamiento, el inicio de sesión aún puede continuar.
     }
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
     if (error) {
@@ -1454,12 +1738,15 @@ function App() {
       return
     }
     setGrades(generated.grades)
+    queueGradeSave(selectedCourseId, generated.grades)
     setResult(generated.result)
   }
 
   function handleClean() {
     const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
-    setGrades(emptyDynamicGrades(items))
+    const clearedGrades = emptyDynamicGrades(items)
+    setGrades(clearedGrades)
+    queueGradeSave(selectedCourseId, clearedGrades)
     setResult(null)
   }
 
@@ -1479,42 +1766,30 @@ function App() {
       notify('error', calculation.error)
       return
     }
-    const normalized = normalizeGradesForDb(grades)
-    if (evaluationTemplate?.id && items.some((item) => item.id)) {
-      const scoreRows = items
-        .filter((item) => item.id)
-        .map((item) => ({
-          user_id: session.user.id,
-          course_id: selectedCourseId,
-          student_course_id: activeCourse?.student_course_id || null,
-          evaluation_template_id: evaluationTemplate.id,
-          evaluation_component_id: item.id,
-          score: toNumber(grades[item.key]),
-          updated_at: new Date().toISOString()
-        }))
-      const { error: scoreError } = await supabase
-        .from('student_evaluation_scores')
-        .upsert(scoreRows, { onConflict: 'user_id,course_id,evaluation_component_id' })
-      if (scoreError) {
-        notify('error', getErrorMessage(scoreError))
+    // El botón conserva la acción histórica y además fuerza la sincronización
+    // de cualquier edición pendiente antes de guardar el historial.
+    const pending = pendingGradeSaveRef.current
+    if (!pending || pending.courseId !== selectedCourseId) {
+      const directError = await persistGradesForCourse(selectedCourseId, grades, items, evaluationTemplate, activeCourse)
+      if (directError) {
+        setGradeSaveStatus('error')
+        setGradeSaveError(getErrorMessage(directError))
+        notify('error', getErrorMessage(directError))
         return
       }
+      clearGradeDraft(session.user.id, selectedCourseId)
+      setGradeSaveStatus('saved')
     } else {
-      const upsertPayload = {
-        user_id: session.user.id,
-        course_id: selectedCourseId,
-        ...normalized
-      }
-      const { error: gradeError } = await supabase.from('course_grades').upsert(upsertPayload, { onConflict: 'user_id,course_id' })
-      if (gradeError) {
-        notify('error', getErrorMessage(gradeError))
+      const pendingError = await flushPendingGradeSave()
+      if (pendingError) {
+        notify('error', getErrorMessage(pendingError))
         return
       }
     }
     const savePayload = {
       user_id: session.user.id,
       course_id: selectedCourseId,
-      ...normalized,
+      ...normalizeGradesForDb(grades),
       evaluation_template_id: evaluationTemplate?.id || null,
       evaluation_snapshot: {
         template: evaluationTemplate ? { id: evaluationTemplate.id, name: evaluationTemplate.name } : null,
@@ -2199,11 +2474,17 @@ function App() {
     await dismissAnnouncement(announcementId)
   }
 
-  if (loading) return <Splash />
+  if (loading) return <Splash phase={initializationPhase} />
 
   return (
     <div className="app-shell">
       {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
+      {initializationError && !session && !guestMode && (
+        <div className="initialization-error" role="alert">
+          <span>{initializationError}</span>
+          <button className="btn secondary small" onClick={initialize}>Reintentar</button>
+        </div>
+      )}
       {floatingAnnouncement && <FloatingAnnouncementModal announcement={floatingAnnouncement} onClose={() => closeFloatingAnnouncement(floatingAnnouncement.id)} />}
       <main className="app-container">
         {!session && !guestMode && (screen === 'login' || screen === 'welcome') && (
@@ -2250,6 +2531,7 @@ function App() {
                 onGenerate={handleGenerate}
                 onClean={handleClean}
                 onSave={null}
+                onGradeChange={(key, value) => setGrades((previous) => ({ ...previous, [key]: value }))}
                 guestMode
                 evaluationTemplate={evaluationTemplate}
                 evaluationItems={evaluationItems}
@@ -2257,8 +2539,7 @@ function App() {
                 onSelectTemplate={applyEvaluationTemplate}
                 allowTemplateSelection
                 onExtractedGrades={(nextGrades) => {
-                  setGrades((previous) => ({ ...previous, ...nextGrades }))
-                  setResult(null)
+                  handleExtractedGrades(nextGrades)
                 }}
               />
             )}
@@ -2294,6 +2575,11 @@ function App() {
                 onGenerate={handleGenerate}
                 onClean={handleClean}
                 onSave={handleSaveResult}
+                onGradeChange={handleGradeChange}
+                gradeLoadStatus={gradeLoadStatus}
+                gradeSaveStatus={gradeSaveStatus}
+                gradeSaveError={gradeSaveError}
+                onRetrySave={retryGradeSave}
                 activeCourse={activeCourse}
                 evaluationTemplate={evaluationTemplate}
                 evaluationItems={evaluationItems}
@@ -2301,8 +2587,7 @@ function App() {
                 onSelectTemplate={applyEvaluationTemplate}
                 allowTemplateSelection={isAdmin}
                 onExtractedGrades={(nextGrades) => {
-                  setGrades((previous) => ({ ...previous, ...nextGrades }))
-                  setResult(null)
+                  handleExtractedGrades(nextGrades)
                 }}
               />
             )}
@@ -2349,8 +2634,14 @@ function App() {
   )
 }
 
-function Splash() {
-  return <div className="splash"><img src="/logo.png" alt="Mi Nota Final" /><p>Cargando Mi Nota Final...</p></div>
+function Splash({ phase = 'Verificando sesión...' }) {
+  return (
+    <div className="splash" role="status" aria-live="polite">
+      <img src="/logo.png" alt="Mi Nota Final" />
+      <p>{phase}</p>
+      <small>Tus datos se conservan mientras terminamos de preparar la aplicación.</small>
+    </div>
+  )
 }
 
 function Welcome({ onLogin, onRegister, onGuest, onGoogle, onMicrosoft }) {
@@ -2469,8 +2760,18 @@ function GuidedTour({ step, stepIndex, totalSteps, onBack, onNext, onSkip }) {
 function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberSession, setRememberSession] = useState(() => {
+    try {
+      return window.localStorage.getItem(REMEMBER_SESSION_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  })
   const passwordRef = useRef(null)
-  const submitLogin = () => onSubmit(email, password)
+  const persistPreference = () => {
+    try { window.localStorage.setItem(REMEMBER_SESSION_KEY, rememberSession ? 'true' : 'false') } catch { /* almacenamiento no disponible */ }
+  }
+  const submitLogin = () => onSubmit(email, password, rememberSession)
   return (
     <AuthCard title="Mi Nota Final" className="login-card">
       <p className="auth-subtitle">Ingresa tus datos o continúa con una cuenta social.</p>
@@ -2491,9 +2792,13 @@ function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') submitLogin() }}
       />
+      <label className="checkbox-row">
+        <input type="checkbox" checked={rememberSession} onChange={(e) => setRememberSession(e.target.checked)} />
+        <span>Mantener sesión iniciada</span>
+      </label>
       <button className="btn primary" onClick={submitLogin}>Ingresar</button>
-      <SocialButton provider="google" onClick={onGoogle}>Continuar con Google</SocialButton>
-      <SocialButton provider="microsoft" onClick={onMicrosoft}>Continuar con Microsoft</SocialButton>
+      <SocialButton provider="google" onClick={() => { persistPreference(); onGoogle() }}>Continuar con Google</SocialButton>
+      <SocialButton provider="microsoft" onClick={() => { persistPreference(); onMicrosoft() }}>Continuar con Microsoft</SocialButton>
       <div className="auth-links">
         <button className="btn link" onClick={() => onReset(email)}>Olvidé mi contraseña</button>
         <button className="btn link" onClick={onRegister}>Crear cuenta nueva</button>
@@ -2805,10 +3110,13 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
   )
 }
 
-function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate, allowTemplateSelection = false, onExtractedGrades }) {
+function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, onGradeChange, gradeLoadStatus = 'idle', gradeSaveStatus = 'idle', gradeSaveError = '', onRetrySave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate, allowTemplateSelection = false, onExtractedGrades }) {
   const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
   const groups = [...new Set(items.map((item) => item.group || 'Evaluaciones'))]
-  const updateGrade = (key, value) => setGrades((prev) => ({ ...prev, [key]: value }))
+  const updateGrade = (key, value) => {
+    if (onGradeChange) onGradeChange(key, value)
+    else setGrades((prev) => ({ ...prev, [key]: value }))
+  }
   const canUseImageReader = guestMode ? Boolean(evaluationTemplate?.id) : Boolean(selectedCourseId || activeCourse?.id)
   const [imagePreview, setImagePreview] = useState('')
   const [imageName, setImageName] = useState('')
@@ -2982,6 +3290,16 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
       </Card>
       </div>
       {evaluationTemplate && <Card><p className="hint"><b>Método de evaluación:</b> {evaluationTemplate.name} · <b>Nota mínima:</b> {formatNumber(evaluationTemplate.min_passing_grade || settings.minimum_grade)}</p></Card>}
+      {!guestMode && selectedCourseId && (
+        <div className={`grade-sync-status ${gradeSaveStatus === 'error' ? 'error' : ''}`} aria-live="polite">
+          {gradeLoadStatus === 'loading' && <span>Recuperando tus calificaciones…</span>}
+          {gradeLoadStatus === 'error' && <span>No se pudieron recuperar las calificaciones. Se conservaron los valores disponibles.</span>}
+          {gradeSaveStatus === 'pending' && <span>Pendiente de sincronización…</span>}
+          {gradeSaveStatus === 'saving' && <span>Guardando…</span>}
+          {gradeSaveStatus === 'saved' && <span>Guardado correctamente.</span>}
+          {gradeSaveStatus === 'error' && <><span>{gradeSaveError || 'Error al guardar.'} Revisa tu conexión e inténtalo nuevamente.</span><button className="btn secondary small" type="button" onClick={onRetrySave}>Reintentar</button></>}
+        </div>
+      )}
       <div data-tour="calculator-grades">
         {groups.map((group) => (
           <EvaluationSection key={group} title={group} items={items.filter((item) => item.group === group)} grades={grades} settings={settings} updateGrade={updateGrade} flexible />
