@@ -2,7 +2,7 @@
 
 Fecha de revisión: 2026-10-12  
 Rama de trabajo: `codex/optimizacion-estabilidad`  
-Modalidad: cambios locales, sin push, merge, migraciones ni despliegue.
+Modalidad: cambios validados y publicados en `origin/main`; sin migraciones ni despliegue manual adicional.
 
 ## 1. Resumen ejecutivo
 
@@ -49,6 +49,8 @@ La política legal contiene campos marcados como pendientes porque no existe inf
 
 ## 8. Git
 
-- Rama activa: `codex/optimizacion-estabilidad`.
-- Push, merge, migraciones y despliegue: no realizados.
-- Estado: cambios locales pendientes de commit.
+- Commit de la mejora: `0e7e3f9` (`Implementar mejoras administrativas y legales`).
+- Rama de trabajo: `codex/optimizacion-estabilidad`.
+- Producción Git: `main` actualizado mediante fast-forward y publicado en `origin/main`.
+- Push y merge: realizados; migraciones y despliegue manual: no realizados.
+- Estado: árbol limpio salvo `marketing/`, que permanece sin seguimiento y fuera de esta entrega.
