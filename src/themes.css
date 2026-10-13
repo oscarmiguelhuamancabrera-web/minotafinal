@@ -82,6 +82,16 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   align-items: flex-end;
   gap: 10px;
 }
+.pwa-install-wrap { position: relative; display: grid; gap: 8px; }
+.pwa-install-button { width: 100%; min-height: 42px; }
+.pwa-install-help { position: relative; padding: 12px 32px 12px 12px; border: 1px solid var(--border, #eadcff); border-radius: 14px; background: var(--surface-subtle, #fbf8ff); color: var(--ink); font-size: .86rem; line-height: 1.4; }
+.pwa-install-help p { margin: 0; color: var(--muted); }
+.pwa-install-close { position: absolute; top: 6px; right: 7px; border: 0; background: transparent; color: var(--muted); font-size: 1.25rem; line-height: 1; }
+.about-build-info { display: grid; gap: 4px; margin-top: 10px; color: var(--purple-dark); }
+.about-build-info span { color: var(--muted); font-size: .85rem; font-weight: 700; }
+.connection-status { position: fixed; left: 50%; top: 14px; z-index: 60; transform: translateX(-50%); width: min(92vw, 560px); padding: 10px 14px; border-radius: 14px; text-align: center; font-size: .86rem; font-weight: 800; box-shadow: var(--shadow); }
+.connection-status.offline { background: var(--warning-bg, #fff7ed); border: 1px solid var(--warning-border, #fed7aa); color: var(--warning-text, #92400e); }
+.connection-status.reconnecting { background: var(--info-bg, #eff6ff); border: 1px solid var(--info-border, #bfdbfe); color: var(--info-text, #1d4ed8); }
 .theme-floating-trigger {
   width: 48px;
   height: 48px;

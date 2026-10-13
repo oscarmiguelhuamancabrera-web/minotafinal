@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import postcss from 'postcss'
+import { getPeruDayBounds, isWithinPeruPeriod, todayISO, formatPeruHour } from '../src/utils/timezone.js'
 
 const bootSource = fs.readFileSync(new URL('../public/theme-init.js', import.meta.url), 'utf8')
 
@@ -147,4 +148,19 @@ test('la PWA usa un identificador de build y verifica version.json sin caché', 
   assert.match(updater, /mnf:last-update-attempt/)
   assert.match(vercel, /"\/version\.json"/)
   assert.match(vercel, /"\/index\.html"/)
+})
+
+test('las estadísticas respetan el cambio de día de America/Lima', () => {
+  const beforeUtc = new Date('2026-10-12T23:59:00Z') // 18:59 en Lima
+  const afterUtc = new Date('2026-10-13T00:00:00Z') // 19:00 en Lima
+  const midnightUtc = new Date('2026-10-13T05:00:00Z') // 00:00 del día siguiente en Lima
+  assert.equal(todayISO(beforeUtc), '2026-10-12')
+  assert.equal(todayISO(afterUtc), '2026-10-12')
+  assert.equal(todayISO(midnightUtc), '2026-10-13')
+  assert.equal(formatPeruHour(afterUtc), '19:00')
+  const bounds = getPeruDayBounds(beforeUtc)
+  assert.equal(bounds.start.toISOString(), '2026-10-12T05:00:00.000Z')
+  assert.equal(bounds.end.toISOString(), '2026-10-13T05:00:00.000Z')
+  assert.equal(isWithinPeruPeriod(new Date('2026-10-13T00:30:00Z'), 'today', beforeUtc), true)
+  assert.equal(isWithinPeruPeriod(new Date('2026-10-13T05:00:00Z'), 'today', beforeUtc), false)
 })

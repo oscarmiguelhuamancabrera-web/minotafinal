@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createWorker } from 'tesseract.js'
 import { REMEMBER_SESSION_KEY, supabase } from './lib/supabase'
 import { parseGradeText } from './utils/ocr'
+import { APP_TIME_ZONE, formatPeruHour, isWithinPeruPeriod as isWithinPeriod, todayISO } from './utils/timezone'
 import { initPwaUpdates } from './pwaUpdates'
+import PwaInstallButton from './components/PwaInstallButton'
+import ConnectionStatus from './components/ConnectionStatus'
 import {
   DEFAULT_SETTINGS,
   EVALUATIONS,
@@ -22,6 +25,7 @@ import {
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
 const APP_VERSION = typeof __MN_BUILD_ID__ === 'string' ? __MN_BUILD_ID__ : 'dev'
+const APP_RELEASE_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
 
 const GUIDED_TOUR_STEPS = [
   { screen: 'courses', target: 'course-overview', title: 'Agrega tus cursos', text: 'Este es el punto de partida. Aquí eliges únicamente los cursos que estás llevando.' },
@@ -48,18 +52,14 @@ const emptyAuth = {
   cycleId: ''
 }
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10)
-}
-
 function timeOnly(value) {
   if (!value) return '—'
-  return new Date(value).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
+  return new Date(value).toLocaleTimeString('es-PE', { timeZone: APP_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
 }
 
 function dateOnly(value) {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('es-PE')
+  return new Date(value).toLocaleDateString('es-PE', { timeZone: APP_TIME_ZONE })
 }
 
 
@@ -328,26 +328,6 @@ async function readImageText(file, onProgress) {
     text: String(data?.text || '').trim(),
     confidence: Math.round(Number(data?.confidence || 0))
   }
-}
-
-function isWithinPeriod(value, period = 'today') {
-  if (!value || period === 'all') return true
-  const date = new Date(value)
-  const now = new Date()
-  const start = new Date(now)
-  start.setHours(0, 0, 0, 0)
-  if (period === 'today') return date >= start
-  if (period === '7d') {
-    const d = new Date(now)
-    d.setDate(d.getDate() - 7)
-    return date >= d
-  }
-  if (period === '30d') {
-    const d = new Date(now)
-    d.setDate(d.getDate() - 30)
-    return date >= d
-  }
-  return true
 }
 
 function formatStatus(status) {
@@ -2504,6 +2484,7 @@ function App() {
   return (
     <div className="app-shell">
       {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
+      <ConnectionStatus />
       {initializationError && !session && !guestMode && (
         <div className="initialization-error" role="alert">
           <span>{initializationError}</span>
@@ -2895,6 +2876,7 @@ function AuthCard({ title, children, onBack, className = '' }) {
       <img className="mini-logo" src="/logo.png" alt="Mi Nota Final" />
       <h1>{title}</h1>
       <div className="stack">{children}</div>
+      <PwaInstallButton />
       <Footer />
     </section>
   )
@@ -2911,6 +2893,7 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
             <span>{guestMode ? 'Modo invitado' : `Hola, ${firstWord(profile?.first_name || profile?.full_name)}`}</span>
           </div>
         </div>
+        <PwaInstallButton />
         <nav className="desktop-nav">
           {!guestMode && <button className={screen === 'dashboard' ? 'active' : ''} onClick={() => setScreen('dashboard')}>Inicio</button>}
           {!guestMode && <button className={screen === 'courses' ? 'active' : ''} onClick={() => setScreen('courses')}>Cursos</button>}
@@ -3645,7 +3628,7 @@ function About() {
         <h1>Mi Nota Final</h1>
         <p>Aplicación web desarrollada para ayudar a estudiantes a calcular sus notas de fin de ciclo de forma rápida, sencilla y sin anuncios.</p>
         <p>Los cálculos guardados por usuarios registrados podrán ser revisados por el administrador del sistema con fines de soporte, control y mejora de la aplicación.</p>
-        <b>Versión: {APP_VERSION}</b>
+          <div className="about-build-info"><b>Versión: {APP_RELEASE_VERSION}</b><span>Build: {APP_VERSION}</span></div>
         <Footer />
       </Card>
     </div>
@@ -3979,7 +3962,9 @@ function AdminDashboard({ data, onLoad, setScreen }) {
   const studentCourses = data?.studentCourses || []
   const usageEvents = (data?.usageEvents || []).filter((event) => (!event.user_id || studentUserIds.has(event.user_id)) && isWithinPeriod(event.created_at, filters.period))
   const periodLogins = logins.filter((login) => isWithinPeriod(login.login_at, filters.period))
-  const todayLogins = logins.filter((login) => login.login_date === todayISO())
+  // login_at es el instante canónico; login_date puede haber sido calculado
+  // por PostgreSQL en UTC y reiniciar el día a las 19:00 de Lima.
+  const todayLogins = logins.filter((login) => isWithinPeriod(login.login_at, 'today'))
   const uniqueToday = new Set(todayLogins.map((login) => login.user_id)).size
   const activeRealUsers = new Set(usageEvents.map((event) => event.user_id)).size
   const onlyLoginUsers = Math.max(new Set(periodLogins.map((login) => login.user_id)).size - activeRealUsers, 0)
@@ -4599,7 +4584,7 @@ function buildDistribution(users, courses, calculations) {
 function groupByHour(logins) {
   const result = {}
   logins.forEach((login) => {
-    const hour = new Date(login.login_at).toLocaleTimeString('es-PE', { hour: '2-digit', hour12: false }) + ':00'
+    const hour = formatPeruHour(login.login_at)
     result[hour] = (result[hour] || 0) + 1
   })
   return result
