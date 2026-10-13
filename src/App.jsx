@@ -2765,7 +2765,6 @@ function OnboardingTutorial({ onStart, onSkip }) {
         <button className="btn primary" onClick={onStart}>Empezar</button>
         <button className="btn ghost" onClick={onSkip}>Omitir tutorial</button>
       </div>
-      <Footer />
     </section>
   )
 }
@@ -2994,15 +2993,25 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
   const pendingWeightedCourses = Math.max(0, courses.length - weightedSummary.rows.length)
   return (
     <div className="page fade-in">
-      <div className="hero-panel">
-        <div>
-          <p className="eyebrow">Panel principal</p>
-          <h1>Hola, {firstWord(profile?.first_name || profile?.full_name)}</h1>
-          <p>{academicContext(profile)}</p>
+      <div className="hero-panel dashboard-hero">
+        <div className="hero-copy">
+          <p className="eyebrow">Tu espacio académico</p>
+          <h1>Hola, {firstWord(profile?.first_name || profile?.full_name)} <span className="hero-wave" aria-hidden="true">👋</span></h1>
+          <p>Tu asistente académico para planificar, calcular y llevar el control de tus notas.</p>
+          <small className="hero-context">{academicContext(profile)}</small>
+          <div className="hero-actions">
+            <button className="btn primary" onClick={() => setScreen('calculator')}>🧮 Calcular mis notas <span aria-hidden="true">→</span></button>
+            <button className="btn hero-outline" onClick={() => setScreen('courses')}>📚 Ver cursos</button>
+            <button className="btn hero-profile-link" onClick={() => setScreen('profile')}>↗ Cambiar perfil académico</button>
+          </div>
         </div>
-        <div className="hero-actions">
-          <button className="btn secondary small" onClick={() => setScreen('profile')}>🔄 Cambiar perfil académico</button>
-          <button className="btn primary small" onClick={() => setScreen('calculator')}>🧮 Calcular</button>
+        <div className="hero-visual" aria-hidden="true">
+          <div className="hero-orb hero-orb-one" />
+          <div className="hero-orb hero-orb-two" />
+          <div className="hero-student-card"><span>✓</span><i /><i /><i /></div>
+          <div className="hero-cap">🎓</div>
+          <div className="hero-graph"><b /><b /><b /><b /></div>
+          <div className="hero-doodle">Pequeños<br />cálculos,<br /><strong>grandes logros</strong></div>
         </div>
       </div>
       <div className="cards stats-grid">
@@ -3023,11 +3032,11 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
           </div>
         </Card>
       )}
-      <Card>
+      <Card className="dashboard-summary-card">
         <div className="section-title">
-          <span>📌</span>
+          <span>▥</span>
           <h3>Resumen de tus notas</h3>
-          <button className="btn primary small" onClick={() => setScreen('calculator')}>Calcular</button>
+          <button className="btn ghost small" onClick={() => setScreen('calculator')}>Calcular</button>
         </div>
         {courses.length === 0 && (
           <Empty text="Aún no agregaste cursos a tu lista. Entra a Cursos y agrega solo los que estás llevando." compact />
@@ -3061,12 +3070,11 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
           </div>
         )}
       </Card>
-      <div className="grid three">
+      <div className="grid three dashboard-quick-actions">
         <ActionCard title="Mis cursos" text="Agrega cursos regulares, arrastrados, adelantados, electivos u otros." button="Ver cursos" onClick={() => setScreen('courses')} />
         <ActionCard title="Historial" text="Revisa los cálculos que decidiste guardar." button="Ver historial" onClick={() => setScreen('history')} />
         <ActionCard title="Avisos y sugerencias" text="Revisa novedades, envía reportes y consulta respuestas del administrador." button="Ver avisos" onClick={() => setScreen('communication')} />
       </div>
-      <Footer />
     </div>
   )
 }
@@ -3698,7 +3706,6 @@ function About() {
         <p>Aplicación web desarrollada para ayudar a estudiantes a calcular sus notas de fin de ciclo de forma rápida, sencilla y sin anuncios.</p>
         <p>Los cálculos guardados por usuarios registrados podrán ser revisados por el administrador del sistema con fines de soporte, control y mejora de la aplicación.</p>
           <div className="about-build-info"><b>Versión: {APP_RELEASE_VERSION}</b><span>Build: {APP_VERSION}</span></div>
-        <Footer />
       </Card>
     </div>
   )
@@ -4743,7 +4750,8 @@ function StatBox({ label, value, onClick }) {
 }
 
 function ActionCard({ title, text, button, onClick }) {
-  return <Card><h3>{title}</h3><p>{text}</p><button className="btn secondary small" onClick={onClick}>{button}</button></Card>
+  const icons = { 'Mis cursos': '🎓', Historial: '◷', 'Avisos y sugerencias': '💡', Perfil: '◉', Ajustes: '⚙', Comunicación: '◌', 'Acerca de': 'i', 'Panel administrador': '▦' }
+  return <Card className="action-card"><span className="action-card-icon" aria-hidden="true">{icons[title] || '•'}</span><div className="action-card-copy"><h3>{title}</h3><p>{text}</p></div><button className="action-card-arrow" onClick={onClick} aria-label={`${button}: ${title}`}>→</button></Card>
 }
 
 function Empty({ text, compact }) {
