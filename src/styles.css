@@ -145,6 +145,35 @@ p { color: var(--muted); line-height: 1.5; }
 .hint { font-size: .88rem; color: var(--muted); }
 .checkbox-row { display: flex; align-items: center; justify-content: flex-start; gap: 9px; color: var(--muted); font-size: .9rem; font-weight: 700; text-align: left; }
 .checkbox-row input { width: 17px; height: 17px; accent-color: var(--purple); }
+.inline-link { border: 0; padding: 0; background: transparent; color: var(--purple); text-decoration: underline; font-weight: 800; cursor: pointer; }
+.legal-consent { align-items: flex-start; }
+.site-footer { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; margin-top: 22px; color: var(--muted); font-size: .78rem; }
+.footer-links { display: inline-flex; flex-wrap: wrap; gap: 10px; }
+.legal-page { width: min(96vw, 860px); margin: 28px auto; padding: 30px; border: 1px solid var(--border-glass, #eadcff); border-radius: 28px; background: var(--surface-glass, rgba(255,255,255,.9)); box-shadow: var(--shadow-local, var(--shadow)); }
+.legal-page h1 { margin: 14px 0 12px; }
+.legal-page h2 { margin: 22px 0 6px; color: var(--purple-dark); font-size: 1.1rem; }
+.legal-page article p { margin-bottom: 0; }
+.legal-intro { padding: 14px 16px; border-radius: 16px; background: var(--surface-accent, #f4ecff); }
+.legal-actions { margin-top: 26px; display: flex; justify-content: flex-end; }
+.admin-access-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 0 0 20px; }
+.admin-access-grid .btn { min-height: 64px; }
+.saved-calculation-groups { display: grid; gap: 14px; margin-top: 16px; }
+.saved-student-card, .saved-course-card { overflow: hidden; border: 1px solid var(--border, #eadcff); border-radius: 18px; background: var(--surface, #fff); }
+.saved-student-summary, .saved-course-summary { width: 100%; display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(190px, 1fr) auto auto; align-items: center; gap: 12px; padding: 16px; border: 0; background: transparent; color: inherit; text-align: left; }
+.saved-student-summary:hover, .saved-course-summary:hover { background: var(--surface-subtle, #faf7ff); }
+.saved-student-summary strong, .saved-course-summary strong { display: block; color: var(--purple-dark); }
+.saved-student-summary small, .saved-course-summary small { display: block; margin-top: 4px; color: var(--muted); }
+.saved-context-summary, .saved-course-metrics { color: var(--muted); font-size: .86rem; }
+.saved-student-body { display: grid; gap: 12px; padding: 0 14px 14px; }
+.saved-context { padding: 12px; border-radius: 14px; background: var(--surface-subtle, #faf7ff); }
+.saved-context-label { margin: 0 0 8px; font-weight: 800; color: var(--purple-dark); }
+.saved-course-card { background: var(--surface, #fff); }
+.saved-course-summary { grid-template-columns: minmax(180px, 1fr) auto minmax(180px, .8fr) auto; padding: 12px; }
+.saved-course-detail { padding: 0 12px 12px; }
+.saved-course-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; color: var(--muted); font-size: .86rem; }
+.saved-course-meta span { padding: 8px 10px; border-radius: 10px; background: var(--surface-subtle, #faf7ff); }
+.saved-history { margin-top: 10px; }
+.saved-history summary { cursor: pointer; padding: 10px; color: var(--purple); font-weight: 800; }
 
 .grade-sync-status {
   display: flex;
@@ -369,6 +398,11 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   color: var(--muted);
 }
 @media (max-width: 720px) {
+  .admin-access-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-access-grid .btn { min-height: 54px; padding: 10px; }
+  .saved-student-summary, .saved-course-summary { grid-template-columns: 1fr; gap: 8px; }
+  .saved-course-summary .score-pill { width: fit-content; }
+  .legal-page { padding: 22px 18px; }
   .hero-actions {
     width: 100%;
     justify-content: stretch;

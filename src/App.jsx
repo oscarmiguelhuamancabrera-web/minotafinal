@@ -49,7 +49,8 @@ const emptyAuth = {
   universityId: '',
   facultyId: '',
   careerId: '',
-  cycleId: ''
+  cycleId: '',
+  acceptTerms: false
 }
 
 function timeOnly(value) {
@@ -539,6 +540,52 @@ function latestCalculationPerCourse(items = []) {
     seenCourses.add(courseKey)
     return true
   })
+}
+
+function compareCalculationRecency(a, b) {
+  const dateDiff = new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime()
+  if (dateDiff !== 0) return dateDiff
+  return String(b?.id || '').localeCompare(String(a?.id || ''))
+}
+
+function groupSavedCalculations(items = []) {
+  const students = new Map()
+  ;(items || []).filter((item) => item?.user_id).forEach((item) => {
+    const profile = item.profile || {}
+    const course = item.course || {}
+    const studentKey = item.user_id
+    const contextKey = [
+      course.university_id || profile.university_id || 'none',
+      course.faculty_id || profile.faculty_id || 'none',
+      course.career_id || profile.career_id || 'none',
+      course.cycle_id || profile.current_cycle_id || 'none'
+    ].join('|')
+    if (!students.has(studentKey)) students.set(studentKey, { key: studentKey, profile, contexts: new Map() })
+    const student = students.get(studentKey)
+    if (!student.contexts.has(contextKey)) student.contexts.set(contextKey, {
+      key: contextKey,
+      university: course.university || profile.university,
+      faculty: course.faculty || profile.faculty,
+      career: course.career || profile.career,
+      cycle: course.cycle || profile.cycle,
+      courses: new Map()
+    })
+    const context = student.contexts.get(contextKey)
+    const courseKey = item.course_id || course.id || `missing-${item.id}`
+    if (!context.courses.has(courseKey)) context.courses.set(courseKey, { key: courseKey, course, history: [] })
+    context.courses.get(courseKey).history.push(item)
+  })
+  return [...students.values()].map((student) => ({
+    ...student,
+    contexts: [...student.contexts.values()].map((context) => ({
+      ...context,
+      courses: [...context.courses.values()].map((course) => ({
+        ...course,
+        history: [...course.history].sort(compareCalculationRecency),
+        latest: [...course.history].sort(compareCalculationRecency)[0]
+      })).sort((a, b) => String(a.course?.name || '').localeCompare(String(b.course?.name || ''), 'es'))
+    })).sort((a, b) => `${a.university?.name || ''}${a.career?.name || ''}${a.cycle?.name || ''}`.localeCompare(`${b.university?.name || ''}${b.career?.name || ''}${b.cycle?.name || ''}`, 'es'))
+  })).sort((a, b) => fullName(a.profile).localeCompare(fullName(b.profile), 'es'))
 }
 
 function canAdminViewStudent(adminProfile, student) {
@@ -1593,6 +1640,10 @@ function App() {
       notify('error', 'Las contraseñas no coinciden.')
       return
     }
+    if (!form.acceptTerms) {
+      notify('error', 'Debes aceptar los Términos y Condiciones para crear tu cuenta.')
+      return
+    }
 
     const { error } = await supabase.auth.signUp({
       email: form.email.trim(),
@@ -2420,15 +2471,22 @@ function App() {
   }
 
   async function updateAnnouncement(announcementId, payload) {
-    const { error } = await supabase.from('announcements').update({
+    const previous = adminData?.announcements || []
+    const optimistic = previous.map((item) => item.id === announcementId ? { ...item, ...payload } : item)
+    setAdminData((current) => current ? { ...current, announcements: optimistic } : current)
+    const { data: updated, error } = await supabase.from('announcements').update({
       ...payload,
       updated_at: new Date().toISOString()
-    }).eq('id', announcementId)
-    if (error) notify('error', getErrorMessage(error))
-    else {
-      notify('success', 'Anuncio actualizado correctamente.')
-      await loadAdminData()
+    }).eq('id', announcementId).select('*').single()
+    if (error) {
+      setAdminData((current) => current ? { ...current, announcements: previous } : current)
+      notify('error', getErrorMessage(error))
+      return false
     }
+    if (updated) setAdminData((current) => current ? { ...current, announcements: current.announcements.map((item) => item.id === announcementId ? { ...item, ...updated } : item) } : current)
+    notify('success', 'Anuncio actualizado correctamente.')
+    await loadAdminData()
+    return true
   }
 
   async function respondSuggestion(suggestionId, payload) {
@@ -2501,10 +2559,14 @@ function App() {
             onMicrosoft={handleMicrosoftLogin}
             onRegister={() => setScreen('register')}
             onGuest={enterGuestMode}
+            onLegal={(document) => setScreen(document)}
           />
         )}
         {!session && !guestMode && screen === 'register' && (
-          <Register universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('login')} />
+          <Register universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('login')} onLegal={(document) => setScreen(document)} />
+        )}
+        {!session && !guestMode && (screen === 'terms' || screen === 'privacy') && (
+          <LegalDocument type={screen} onBack={() => setScreen('login')} />
         )}
         {session && screen === 'complete-profile' && (
           <CompleteProfile universities={universities} faculties={faculties} careers={careers} cycles={cycles} profile={profile} onSubmit={handleUpdateProfile} />
@@ -2520,6 +2582,7 @@ function App() {
             screen={screen}
             setScreen={setScreen}
             navItems={navItems}
+            onLegal={(document) => setScreen(document)}
             onSignOut={async () => { setGuestMode(false); await supabase.auth.signOut() }}
           >
             {guestMode && screen === 'guest-calculator' && (
@@ -2563,6 +2626,7 @@ function App() {
                 allowTemplateSelection
               />
             )}
+            {(screen === 'terms' || screen === 'privacy') && <LegalDocument type={screen} onBack={() => setScreen(isAdmin ? 'admin-dashboard' : (guestMode ? 'guest-calculator' : 'dashboard'))} />}
             {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} announcements={announcements} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onAddAll={handleAddAllStudentCourses} onHide={handleHideStudentCourse} onUpdateCredits={handleUpdateStudentCourseCredits} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
@@ -2766,7 +2830,7 @@ function GuidedTour({ step, stepIndex, totalSteps, onBack, onNext, onSkip }) {
   )
 }
 
-function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }) {
+function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest, onLegal }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [rememberSession, setRememberSession] = useState(() => {
@@ -2782,7 +2846,7 @@ function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }
   }
   const submitLogin = () => onSubmit(email, password, rememberSession)
   return (
-    <AuthCard title="Mi Nota Final" className="login-card">
+    <AuthCard title="Mi Nota Final" className="login-card" onLegal={onLegal}>
       <p className="auth-subtitle">Ingresa tus datos o continúa con una cuenta social.</p>
       <input
         className="input"
@@ -2817,7 +2881,7 @@ function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest }
   )
 }
 
-function Register({ universities, faculties, careers, cycles, onSubmit, onBack }) {
+function Register({ universities, faculties, careers, cycles, onSubmit, onBack, onLegal }) {
   const [form, setForm] = useState(emptyAuth)
   const filteredFaculties = faculties.filter((faculty) => !form.universityId || faculty.university_id === form.universityId)
   const filteredCareers = careers.filter((career) => !form.facultyId || career.faculty_id === form.facultyId)
@@ -2863,13 +2927,17 @@ function Register({ universities, faculties, careers, cycles, onSubmit, onBack }
         <input className="input" type="password" placeholder="Contraseña" value={form.password} onChange={(e) => update('password', e.target.value)} />
         <input className="input" type="password" placeholder="Confirmar contraseña" value={form.confirmPassword} onChange={(e) => update('confirmPassword', e.target.value)} />
       </div>
+      <label className="checkbox-row legal-consent">
+        <input type="checkbox" checked={form.acceptTerms} onChange={(e) => update('acceptTerms', e.target.checked)} />
+        <span>Declaro haber leído y acepto los <button type="button" className="inline-link" onClick={() => onLegal('terms')}>Términos y Condiciones</button>.</span>
+      </label>
       <button className="btn primary" onClick={() => onSubmit(form)}>Crear cuenta</button>
       <button className="btn link" onClick={onBack}>Ya tengo cuenta</button>
     </AuthCard>
   )
 }
 
-function AuthCard({ title, children, onBack, className = '' }) {
+function AuthCard({ title, children, onBack, className = '', onLegal }) {
   return (
     <section className={`auth-card ${className}`.trim()}>
       {onBack && <button className="back" onClick={onBack}>← Volver</button>}
@@ -2877,12 +2945,12 @@ function AuthCard({ title, children, onBack, className = '' }) {
       <h1>{title}</h1>
       <div className="stack">{children}</div>
       <PwaInstallButton />
-      <Footer />
+      <Footer onLegal={onLegal} />
     </section>
   )
 }
 
-function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, setScreen, navItems, onSignOut }) {
+function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, setScreen, navItems, onLegal, onSignOut }) {
   return (
     <div className="layout">
       <header className="topbar">
@@ -2907,6 +2975,7 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
         </nav>
       </header>
       <section className="content">{children}</section>
+      <Footer onLegal={onLegal} />
       <nav className="mobile-nav">
         {navItems.map(([key, icon, label]) => (
           <button key={key} className={screen === key ? 'active' : ''} onClick={() => setScreen(key)}>
@@ -3748,6 +3817,7 @@ function CommunicationCenter({ announcements = [], suggestions = [], onDismissAn
 function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpdateAnnouncement, onRespondSuggestion }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [tab, setTab] = useState('suggestions')
+  const [updatingAnnouncementId, setUpdatingAnnouncementId] = useState('')
   const [filters, setFilters] = useState({ status: '', q: '' })
   const [announcement, setAnnouncement] = useState({
     title: '', summary: '', content: '', type: 'update', displayMode: 'card', modalContentType: 'text', modalImageUrl: '', repeatMode: 'once', priority: 'normal', status: 'active',
@@ -3892,7 +3962,10 @@ function AdminCommunication({ data, profile, onLoad, onCreateAnnouncement, onUpd
                   <span className={`badge ${item.status}`}>{formatStatus(item.status)}</span>
                 </div>
                 <div className="action-row left">
-                  <button className="btn ghost small" onClick={() => onUpdateAnnouncement(item.id, { status: item.status === 'active' ? 'inactive' : 'active' })}>{item.status === 'active' ? 'Inactivar' : 'Activar'}</button>
+                  <button className="btn ghost small" disabled={updatingAnnouncementId === item.id} onClick={async () => {
+                    setUpdatingAnnouncementId(item.id)
+                    try { await onUpdateAnnouncement(item.id, { status: item.status === 'active' ? 'inactive' : 'active' }) } finally { setUpdatingAnnouncementId('') }
+                  }}>{updatingAnnouncementId === item.id ? 'Guardando…' : item.status === 'active' ? 'Inactivar' : 'Activar'}</button>
                 </div>
               </Card>
             ))}
@@ -4009,6 +4082,13 @@ function AdminDashboard({ data, onLoad, setScreen }) {
   return (
     <div className="page fade-in">
       <Header title="Panel administrador" subtitle="Reportes generales y actividad del sistema." />
+      <div className="admin-access-grid" aria-label="Accesos administrativos">
+        <button className="btn secondary" onClick={() => setScreen('admin-users')}>👥 Gestionar usuarios</button>
+        <button className="btn secondary" onClick={() => setScreen('admin-courses')}>📚 Gestionar cursos</button>
+        <button className="btn secondary" onClick={() => setScreen('admin-calculations')}>📊 Ver cálculos</button>
+        <button className="btn secondary" onClick={() => setScreen('admin-evaluations')}>🧩 Métodos de evaluación</button>
+        <button className="btn secondary" onClick={() => setScreen('admin-communication')}>💬 Comunicación</button>
+      </div>
       <div className="cards stats-grid">
         <StatCard icon="👥" label="Usuarios registrados" value={users.length} />
         <StatCard icon="✅" label="Usuarios activos hoy" value={uniqueToday} />
@@ -4057,13 +4137,6 @@ function AdminDashboard({ data, onLoad, setScreen }) {
         <h3>Solicitudes de cursos no listados</h3>
         <CourseRequestsSummary items={data?.courseRequests || []} error={data?.courseRequestsError} />
       </Card>
-      <div className="grid three">
-        <button className="btn secondary" onClick={() => setScreen('admin-users')}>👥 Gestionar usuarios</button>
-        <button className="btn secondary" onClick={() => setScreen('admin-courses')}>📚 Gestionar cursos</button>
-        <button className="btn secondary" onClick={() => setScreen('admin-calculations')}>📊 Ver cálculos</button>
-        <button className="btn secondary" onClick={() => setScreen('admin-evaluations')}>🧩 Métodos de evaluación</button>
-        <button className="btn secondary" onClick={() => setScreen('admin-communication')}>💬 Comunicación</button>
-      </div>
     </div>
   )
 }
@@ -4400,27 +4473,75 @@ function AdminCourseCard({ course, onUpdate }) {
 function AdminCalculations({ data, onLoad }) {
   useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [q, setQ] = useState('')
-  const rows = (data?.calculations || []).filter((item) => `${item.course?.name || ''} ${fullName(item.profile || {})} ${item.status}`.toLowerCase().includes(q.toLowerCase()))
+  const [university, setUniversity] = useState('')
+  const [career, setCareer] = useState('')
+  const [cycle, setCycle] = useState('')
+  const [openStudents, setOpenStudents] = useState(new Set())
+  const [openCourses, setOpenCourses] = useState(new Set())
+  const calculations = data?.calculations || []
+  const universities = unique(calculations.map((item) => item.course?.university?.name || item.profile?.university?.name).filter(Boolean))
+  const careers = unique(calculations.map((item) => item.course?.career?.name || item.profile?.career?.name).filter(Boolean))
+  const cycles = unique(calculations.map((item) => item.course?.cycle?.name || item.profile?.cycle?.name).filter(Boolean))
+  const filtered = calculations.filter((item) => {
+    const text = `${fullName(item.profile || {})} ${item.profile?.email || ''} ${item.course?.name || ''} ${item.status || ''} ${item.course?.university?.name || item.profile?.university?.name || ''} ${item.course?.career?.name || item.profile?.career?.name || ''} ${item.course?.cycle?.name || item.profile?.cycle?.name || ''}`.toLowerCase()
+    return text.includes(q.toLowerCase()) &&
+      (!university || (item.course?.university?.name || item.profile?.university?.name) === university) &&
+      (!career || (item.course?.career?.name || item.profile?.career?.name) === career) &&
+      (!cycle || (item.course?.cycle?.name || item.profile?.cycle?.name) === cycle)
+  })
+  const groups = groupSavedCalculations(filtered)
+  const toggle = (setter, key) => setter((current) => { const next = new Set(current); next.has(key) ? next.delete(key) : next.add(key); return next })
   return (
     <div className="page fade-in">
-      <Header title="Cálculos guardados" subtitle="Resultados guardados por los usuarios." />
-      <input className="input" placeholder="Buscar por usuario, curso o estado" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="admin-list admin-scroll-list">
-        {rows.map((item) => (
-          <Card key={item.id}>
-            <div className="list-row">
-              <div>
-                <h3>{item.course?.name || 'Curso eliminado'} · {fullName(item.profile)}</h3>
-                <p>{dateOnly(item.created_at)} · Pendientes: {item.pending_evaluations || 'Ninguna'}</p>
-              </div>
-              <div className="score-pill">{formatNumber(item.current_average)}</div>
-            </div>
-            <p className="hint">Estado: {item.status} · Evaluado: {formatPercent(item.evaluated_weight)}% · Pendiente: {formatPercent(item.pending_weight)}%</p>
-          </Card>
-        ))}
+      <Header title="Cálculos guardados" subtitle="Resultados agrupados por estudiante, contexto académico, curso y evaluación." />
+      <div className="filters admin-course-filters">
+        <input className="input" placeholder="Buscar estudiante, universidad, carrera, ciclo, curso o estado" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select className="input" value={university} onChange={(e) => setUniversity(e.target.value)}><option value="">Todas las universidades</option>{universities.map((item) => <option key={item}>{item}</option>)}</select>
+        <select className="input" value={career} onChange={(e) => setCareer(e.target.value)}><option value="">Todas las carreras</option>{careers.map((item) => <option key={item}>{item}</option>)}</select>
+        <select className="input" value={cycle} onChange={(e) => setCycle(e.target.value)}><option value="">Todos los ciclos</option>{cycles.map((item) => <option key={item}>{item}</option>)}</select>
+      </div>
+      {!groups.length && <Empty text="No hay cálculos que coincidan con los filtros." compact />}
+      <div className="saved-calculation-groups">
+        {groups.map((student) => {
+          const contextCount = student.contexts.length
+          const courseCount = student.contexts.reduce((sum, context) => sum + context.courses.length, 0)
+          const studentOpen = openStudents.has(student.key)
+          return <article className="saved-student-card" key={student.key}>
+            <button type="button" className="saved-student-summary" onClick={() => toggle(setOpenStudents, student.key)} aria-expanded={studentOpen}>
+              <span><strong>{fullName(student.profile)}</strong><small>{student.profile?.email || 'Sin correo'}</small></span>
+              <span className="saved-context-summary">{student.contexts[0]?.university?.name || 'Sin universidad'} · {student.contexts[0]?.career?.name || 'Sin carrera'} · {student.contexts[0]?.cycle?.name || 'Sin ciclo'}{contextCount > 1 ? ` · ${contextCount} contextos` : ''}</span>
+              <b>{courseCount} curso{courseCount === 1 ? '' : 's'}</b><span aria-hidden="true">{studentOpen ? '⌃' : '⌄'}</span>
+            </button>
+            {studentOpen && <div className="saved-student-body">{student.contexts.map((context) => <section key={context.key} className="saved-context">
+              <p className="saved-context-label">{context.university?.name || 'Sin universidad'} · {context.career?.name || 'Sin carrera'} · {context.cycle?.name || 'Sin ciclo'}</p>
+              {context.courses.map((course) => <SavedCalculationCourse key={course.key} group={course} open={openCourses.has(`${student.key}|${context.key}|${course.key}`)} onToggle={() => toggle(setOpenCourses, `${student.key}|${context.key}|${course.key}`)} />)}
+            </section>)}</div>}
+          </article>
+        })}
       </div>
     </div>
   )
+}
+
+function SavedCalculationCourse({ group, open, onToggle }) {
+  const item = group.latest
+  const detailRows = calculationDetailRows(item)
+  const registered = detailRows.filter((row) => row.score !== null).length
+  const pending = Math.max(0, detailRows.length - registered)
+  const status = item.status || 'En progreso'
+  return <article className="saved-course-card">
+    <button type="button" className="saved-course-summary" onClick={onToggle} aria-expanded={open}>
+      <span><strong>{group.course?.name || 'Curso eliminado'}</strong><small>Último guardado: {formatLastSeen(item.created_at)} · {item.evaluation_template?.name || item.evaluation_snapshot?.template?.name || 'Plantilla clásica'}</small></span>
+      <span className="score-pill">{formatNumber(item.current_average)}</span>
+      <span className="saved-course-metrics">{status} · {formatPercent(item.evaluated_weight)}% evaluado · {pending} pendiente{pending === 1 ? '' : 's'}</span>
+      <span aria-hidden="true">{open ? '⌃' : '⌄'}</span>
+    </button>
+    {open && <div className="saved-course-detail">
+      <div className="saved-course-meta"><span>Evaluaciones: <b>{detailRows.length}</b></span><span>Registradas: <b>{registered}</b></span><span>Pendientes: <b>{pending}</b></span><span>Estado: <b>{status}</b></span></div>
+      <AdminCalculationRow item={item} expanded onToggle={() => {}} />
+      {group.history.length > 1 && <details className="saved-history"><summary>Historial ({group.history.length - 1} anteriores)</summary>{group.history.slice(1).map((historic) => <AdminCalculationRow key={historic.id} item={historic} expanded={false} onToggle={() => {}} />)}</details>}
+    </div>}
+  </article>
 }
 
 function AdminEvaluations({ data, onLoad, onCreateTemplate, onUpdateTemplate, onCreateComponent, onUpdateComponent }) {
@@ -4641,8 +4762,68 @@ function ResponsiveTable({ rows, columns }) {
   )
 }
 
-function Footer() {
-  return null
+const LEGAL_COPY = {
+  terms: {
+    title: 'Términos y Condiciones',
+    intro: 'Mi Nota Final es una herramienta de apoyo académico para organizar calificaciones y estimar resultados de forma informativa. No constituye un sistema oficial de una universidad ni reemplaza sus registros.',
+    sections: [
+      ['1. Identificación del servicio', 'Mi Nota Final ofrece una calculadora académica, gestión de cursos, historial de resultados y funciones de comunicación para usuarios registrados. La titularidad, razón social, domicilio y canales legales del responsable quedan pendientes de confirmación antes de una publicación definitiva.'],
+      ['2. Objeto de la plataforma', 'La plataforma ayuda a organizar calificaciones y estimar promedios según la configuración disponible para cada curso.'],
+      ['3. Registro de usuarios', 'El registro requiere datos de identificación, contacto y contexto académico. El usuario debe proporcionar información veraz y actualizada.'],
+      ['4. Cuentas y credenciales', 'Cada persona debe proteger sus credenciales, cerrar sesión en equipos compartidos y comunicar cualquier uso no autorizado.'],
+      ['5. Responsabilidades del estudiante', 'El estudiante debe revisar los datos ingresados, pesos y resultados antes de tomar decisiones académicas y no debe cargar información de terceros sin autorización.'],
+      ['6. Registro de calificaciones', 'Las calificaciones se almacenan para permitir la recuperación del trabajo del usuario y la elaboración de cálculos solicitados.'],
+      ['7. Almacenamiento y conservación', 'La conservación, eliminación y respaldos se sujetan a la configuración técnica y a los períodos que deben confirmarse antes de publicar la versión definitiva.'],
+      ['8. Funcionamiento de cálculos', 'Los cálculos dependen de la plantilla de evaluación vigente o de la configuración asociada al registro histórico.'],
+      ['9. Carácter orientativo', 'Los resultados son informativos y no sustituyen actas, constancias ni registros oficiales emitidos por una institución educativa.'],
+      ['10. Protección de información personal', 'El tratamiento de datos personales se describe en la Política de Privacidad y debe observar la legislación peruana aplicable.'],
+      ['11. Acceso administrativo autorizado', 'La administración de Mi Nota Final podrá tratar información derivada de las calificaciones registradas exclusivamente para mantenimiento técnico, actualización, verificación de cálculos, identificación y corrección de errores, generación de estadísticas generales y mejora continua del servicio. El acceso a registros académicos individualizados, cuando resulte necesario para soporte, mantenimiento o verificación, estará restringido a administradores con permisos correspondientes y responderá a una finalidad específica y justificada.'],
+      ['12. Información estadística y no divulgación', 'Para análisis estadístico y mejora del portal se utilizarán datos agregados o adecuadamente anonimizados, evitando nombres, correos u otros identificadores. La administración no divulgará públicamente calificaciones individuales ni usará información académica para finalidades ajenas a las informadas.'],
+      ['13. Disponibilidad y mantenimiento', 'El servicio puede requerir mantenimiento y no se garantiza disponibilidad ininterrumpida. Se procurará conservar la información disponible.'],
+      ['14. Actualizaciones del sistema', 'La plataforma puede cambiar componentes, fórmulas de presentación o interfaces para mantener el servicio, respetando los datos históricos guardados.'],
+      ['15. Limitaciones de responsabilidad', 'El usuario conserva la responsabilidad de contrastar cada resultado con su institución educativa. La plataforma no responde por decisiones tomadas exclusivamente con base en una estimación ni por datos externos incorrectos.'],
+      ['16. Modificaciones, vigencia y aceptación', 'Los términos pueden actualizarse por cambios del servicio o normativa. La versión, fecha efectiva y mecanismo de aceptación deberán confirmarse antes de la publicación legal definitiva.']
+    ]
+  },
+  privacy: {
+    title: 'Política de Privacidad',
+    intro: 'Este documento está preparado para revisión. Las afirmaciones sobre responsable, proveedores, conservación y canales de atención deben confirmarse antes de publicarlo como política definitiva.',
+    sections: [
+      ['1. Datos recopilados', 'Podemos tratar nombres, correo electrónico, datos de autenticación, universidad, facultad, carrera, ciclo, cursos, calificaciones, cálculos, actividad de uso y preferencias necesarias para operar la plataforma.'],
+      ['2. Finalidades y base legal', 'Los datos se usan para autenticar, prestar la calculadora, guardar y recuperar resultados, atender solicitudes, mantener la seguridad y generar estadísticas generales. La base legal concreta y los consentimientos independientes que correspondan deben ser confirmados con asesoría legal peruana.'],
+      ['3. Información académica y acceso administrativo', 'El acceso individualizado queda restringido a administradores autorizados para soporte, mantenimiento o verificación. Los análisis de mejora deben emplear información agregada o anonimizada adecuadamente, sin nombres, correos u otros identificadores directos.'],
+      ['4. Proveedores y seguridad', 'La aplicación utiliza servicios tecnológicos configurados por el proyecto. Deben confirmarse los proveedores, ubicaciones de tratamiento, contratos aplicables y medidas de seguridad antes de afirmar un cumplimiento específico.'],
+      ['5. Conservación y eliminación', 'El período de conservación y el procedimiento de eliminación permanecen pendientes de confirmación. Se conservarán los datos solo durante el tiempo necesario para las finalidades informadas y las obligaciones aplicables una vez definido el criterio.'],
+      ['6. Derechos', 'Las personas podrán solicitar acceso, rectificación, cancelación y oposición, según corresponda bajo la Ley N.º 29733 y su reglamento vigente. El canal, responsable y plazos de respuesta deben confirmarse antes de la publicación.'],
+      ['7. Actualizaciones', 'La política podrá modificarse cuando cambien el servicio, los proveedores o la normativa. La versión vigente y su fecha de entrada en vigor deberán mostrarse junto con el mecanismo de comunicación correspondiente.']
+    ]
+  }
+}
+
+function LegalDocument({ type, onBack }) {
+  const document = LEGAL_COPY[type] || LEGAL_COPY.terms
+  return (
+    <section className="legal-page fade-in">
+      <button className="back" onClick={onBack}>← Volver</button>
+      <p className="eyebrow">Documento para revisión</p>
+      <h1>{document.title}</h1>
+      <p className="legal-intro">{document.intro}</p>
+      {document.sections.map(([heading, text]) => <article key={heading}><h2>{heading}</h2><p>{text}</p></article>)}
+      <div className="legal-actions"><button className="btn secondary" onClick={onBack}>Volver al inicio de sesión</button></div>
+    </section>
+  )
+}
+
+function Footer({ onLegal }) {
+  return (
+    <footer className="site-footer">
+      <span>Mi Nota Final · Herramienta de apoyo académico</span>
+      <span className="footer-links">
+        <button type="button" className="inline-link" onClick={() => onLegal?.('terms')}>Términos y Condiciones</button>
+        <button type="button" className="inline-link" onClick={() => onLegal?.('privacy')}>Política de Privacidad</button>
+      </span>
+    </footer>
+  )
 }
 
 function loadGuestSettings() {
