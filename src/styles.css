@@ -801,6 +801,127 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   color: var(--success-text, #166534);
   font-weight: 700;
 }
+.weighted-opt-in-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid var(--accent-border, rgba(126, 58, 242, 0.28));
+  border-radius: 20px;
+  background: var(--accent-wash, rgba(126, 58, 242, 0.06));
+}
+.weighted-opt-in-panel > div {
+  display: grid;
+  gap: 5px;
+}
+.weighted-opt-in-panel span {
+  color: var(--accent-text, #4b2aa0);
+  font-size: 1rem;
+  font-weight: 900;
+}
+.weighted-opt-in-panel p,
+.weighted-opt-in-panel small {
+  margin: 0;
+  color: var(--muted);
+}
+.weighted-error,
+.weighted-modal-error {
+  color: var(--error-text, #991b1b) !important;
+  font-weight: 800;
+}
+.weighted-summary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.weighted-summary-actions p { margin: 0; }
+.weighted-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: var(--backdrop, rgba(17, 24, 39, 0.62));
+  backdrop-filter: blur(3px);
+}
+.weighted-modal {
+  width: min(94vw, 720px);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-glass, rgba(255, 255, 255, 0.35));
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-local, 0 24px 80px rgba(17, 24, 39, 0.35));
+}
+.weighted-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  color: var(--on-brand, #fff);
+  background: var(--modal-header, #25194f);
+}
+.weighted-modal-header h2 { margin: 4px 0 0; color: inherit; }
+.weighted-modal-header .eyebrow { color: rgba(255, 255, 255, .72); }
+.weighted-modal-close {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.weighted-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+}
+.weighted-modal-body > p { margin: 0; }
+.weighted-modal-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-subtle, #faf7ff);
+  color: var(--muted);
+}
+.weighted-course-list,
+.weighted-confirm-list { display: grid; gap: 8px; }
+.weighted-course-row,
+.weighted-confirm-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #eee7fb);
+  border-radius: 16px;
+}
+.weighted-course-row > div { display: grid; gap: 3px; }
+.weighted-course-row small { color: var(--muted); }
+.weighted-credit-field { width: 112px; display: grid; gap: 4px; }
+.weighted-credit-field span { color: var(--muted); font-size: .76rem; font-weight: 800; }
+.weighted-credit-field .input { text-align: center; font-weight: 800; }
+.weighted-modal-warning,
+.weighted-modal-change-note { color: var(--muted); font-weight: 700; }
+.weighted-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 22px;
+  border-top: 1px solid var(--border, #eee7fb);
+}
 .student-summary-row,
 .student-course-card {
   display: grid;
@@ -884,6 +1005,13 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   .weighted-summary-panel {
     grid-template-columns: 1fr;
   }
+  .weighted-opt-in-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .weighted-summary-actions {
+    justify-content: flex-start;
+  }
   .student-summary-row,
   .student-course-card {
     grid-template-columns: 1fr;
@@ -899,6 +1027,18 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
   .credit-field {
     width: 100%;
   }
+}
+@media (max-width: 560px) {
+  .weighted-modal-backdrop { padding: 8px; }
+  .weighted-modal { max-height: 96vh; border-radius: 18px; }
+  .weighted-modal-header,
+  .weighted-modal-body,
+  .weighted-modal-footer { padding-left: 16px; padding-right: 16px; }
+  .weighted-course-row,
+  .weighted-confirm-list > div { align-items: stretch; flex-direction: column; }
+  .weighted-credit-field { width: 100%; }
+  .weighted-modal-footer { justify-content: stretch; }
+  .weighted-modal-footer .btn { flex: 1; }
 }
 
 /* v1.1.0 multiuniversidad */

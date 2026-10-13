@@ -6,6 +6,7 @@ import { APP_TIME_ZONE, formatPeruHour, isWithinPeruPeriod as isWithinPeriod, to
 import { initPwaUpdates } from './pwaUpdates'
 import PwaInstallButton from './components/PwaInstallButton'
 import ConnectionStatus from './components/ConnectionStatus'
+import { courseCreditIsConfirmed, storedCourseCredits, weightedAverageSummary } from './utils/weighted'
 import {
   DEFAULT_SETTINGS,
   EVALUATIONS,
@@ -496,31 +497,8 @@ function courseCredits(course) {
   return credits !== null && credits > 0 ? credits : 1
 }
 
-function weightedAverageSummary(courses = [], history = []) {
-  const rows = (courses || [])
-    .map((course) => {
-      const latest = latestHistoryForCourse(history, course.id)
-      const average = toNumber(latest?.current_average)
-      const credits = courseCredits(course)
-      if (average === null) return null
-      return {
-        course,
-        latest,
-        average,
-        credits,
-        points: average * credits
-      }
-    })
-    .filter(Boolean)
-
-  const totalCredits = rows.reduce((sum, item) => sum + item.credits, 0)
-  const totalPoints = rows.reduce((sum, item) => sum + item.points, 0)
-
-  return {
-    rows,
-    totalCredits,
-    average: totalCredits > 0 ? totalPoints / totalCredits : null
-  }
+function cycleLabel(cycles, cycleId) {
+  return cycles?.find((cycle) => cycle.id === cycleId)?.name || 'Ciclo académico seleccionado'
 }
 
 function uniqueValidCalculations(items = []) {
@@ -730,6 +708,11 @@ function App() {
   const [evaluationTemplates, setEvaluationTemplates] = useState([])
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
+  const [weightedPreference, setWeightedPreference] = useState(null)
+  const [weightedPreferenceStatus, setWeightedPreferenceStatus] = useState('idle')
+  const [weightedPreferenceError, setWeightedPreferenceError] = useState('')
+  const [weightedModal, setWeightedModal] = useState(null)
+  const [weightedSaving, setWeightedSaving] = useState(false)
   const [adminData, setAdminData] = useState(null)
   const [announcements, setAnnouncements] = useState([])
   const [suggestions, setSuggestions] = useState([])
@@ -755,6 +738,8 @@ function App() {
   const autosaveRevisionRef = useRef(0)
   const pendingGradeSaveRef = useRef(null)
   const savingGradesRef = useRef(false)
+  const weightedReconfirmationCycleRef = useRef('')
+  const weightedPromptedKeyRef = useRef('')
 
   useEffect(() => {
     screenRef.current = screen
@@ -859,6 +844,10 @@ function App() {
         setCourses([])
         setAvailableCourses([])
         setHistory([])
+        setWeightedPreference(null)
+        setWeightedPreferenceStatus('idle')
+        setWeightedPreferenceError('')
+        setWeightedModal(null)
         setSelectedCourseId('')
         if (!guestMode) setScreen('login')
       }
@@ -1176,7 +1165,7 @@ function App() {
       await loadAdminData()
     } else {
       setInitializationPhase('Recuperando tus cursos...')
-      await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id)])
+      await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id, normalizedNameProfile), loadWeightedPreference(normalizedNameProfile)])
       await loadUserCommunication(normalizedNameProfile)
 
       setInitializationPhase('Preparando tus calificaciones...')
@@ -1349,17 +1338,19 @@ function App() {
 
     let studentRes = await supabase
       .from('student_courses')
-      .select(`id,enrollment_type,status,credits,course_id,course:courses!inner(${COURSE_SELECT})`)
+      .select(`id,enrollment_type,status,credits,updated_at,course_id,course:courses!inner(${COURSE_SELECT})`)
       .eq('user_id', userProfile.id)
       .eq('status', 'visible')
+      .eq('cycle_id', userProfile.current_cycle_id)
       .eq('course.status', 'active')
 
     if (studentRes.error && String(studentRes.error.message || '').toLowerCase().includes('credits')) {
       studentRes = await supabase
         .from('student_courses')
-        .select(`id,enrollment_type,status,course_id,course:courses!inner(${COURSE_SELECT})`)
+        .select(`id,enrollment_type,status,updated_at,course_id,course:courses!inner(${COURSE_SELECT})`)
         .eq('user_id', userProfile.id)
         .eq('status', 'visible')
+        .eq('cycle_id', userProfile.current_cycle_id)
         .eq('course.status', 'active')
     }
 
@@ -1368,6 +1359,7 @@ function App() {
         .map((row) => ({
           ...row.course,
           student_course_id: row.id,
+          student_course_updated_at: row.updated_at,
           enrollment_type: row.enrollment_type || 'regular',
           credits: row.credits ?? 1,
           student_course_status: row.status || 'visible'
@@ -1385,17 +1377,194 @@ function App() {
     setCourses(fallback.map((course) => ({ ...course, enrollment_type: 'regular' })))
   }
 
-  async function loadHistory(userId = session?.user?.id) {
+  async function loadHistory(userId = session?.user?.id, contextProfile = profile) {
     if (!userId) return
-    const { data, error } = await supabase
+    let query = supabase
       .from('calculation_history')
-      .select('*, course:courses!inner(name,status)')
+      .select('*, course:courses!inner(name,status,cycle_id)')
       .eq('user_id', userId)
       .eq('course.status', 'active')
       .order('created_at', { ascending: false })
       .limit(50)
+    if (contextProfile?.current_cycle_id) query = query.eq('course.cycle_id', contextProfile.current_cycle_id)
+    const { data, error } = await query
     if (!error) setHistory(data || [])
   }
+
+  async function loadWeightedPreference(userProfile = profile) {
+    const userId = session?.user?.id || userProfile?.id
+    const cycleId = userProfile?.current_cycle_id
+    if (!userId || !cycleId || isAdminRole(userProfile?.role)) {
+      setWeightedPreference(null)
+      setWeightedPreferenceStatus('ready')
+      setWeightedPreferenceError('')
+      return null
+    }
+
+    setWeightedPreferenceStatus('loading')
+    setWeightedPreferenceError('')
+    const { data, error } = await supabase
+      .from('student_weighted_preferences')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('cycle_id', cycleId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('No se pudo cargar la configuración del ponderado:', error)
+      setWeightedPreference(null)
+      setWeightedPreferenceStatus('error')
+      setWeightedPreferenceError('La configuración del ponderado necesita la migración de Supabase para activarse.')
+      return null
+    }
+
+    const preference = data || { user_id: userId, cycle_id: cycleId, enabled: false, confirmed_at: null }
+    const requiresConfirmation = weightedReconfirmationCycleRef.current === cycleId
+    setWeightedPreference(requiresConfirmation ? { ...preference, enabled: false, requires_confirmation: true } : preference)
+    setWeightedPreferenceStatus('ready')
+    return preference
+  }
+
+  function openWeightedConfiguration() {
+    const cycleId = profile?.current_cycle_id
+    if (!cycleId) {
+      notify('error', 'Selecciona un ciclo académico antes de configurar el ponderado.')
+      return
+    }
+    const selectedCourses = (courses || []).filter((course) => course.cycle_id === cycleId)
+    setWeightedModal({
+      step: 'edit',
+      cycleId,
+      rows: selectedCourses.map((course) => ({
+        courseId: course.id,
+        studentCourseId: course.student_course_id || null,
+        name: course.name,
+        credits: storedCourseCredits(course) === null ? '' : String(storedCourseCredits(course)),
+        currentCredits: storedCourseCredits(course),
+        confirmed: courseCreditIsConfirmed(course, weightedPreference),
+        universityId: course.university_id || profile?.university_id || null,
+        facultyId: course.faculty_id || profile?.faculty_id || null,
+        careerId: course.career_id || profile?.career_id || null,
+        enrollmentType: course.enrollment_type || 'regular'
+      }))
+    })
+  }
+
+  function updateWeightedModalCredit(courseId, value) {
+    setWeightedModal((current) => current ? {
+      ...current,
+      rows: current.rows.map((row) => row.courseId === courseId ? { ...row, credits: value } : row)
+    } : current)
+  }
+
+  function continueWeightedConfiguration() {
+    if (!weightedModal) return
+    const invalid = weightedModal.rows.find((row) => {
+      const value = toNumber(row.credits)
+      return value === null || value <= 0 || value > 30 || Math.abs(value * 100 - Math.round(value * 100)) > 0.001
+    })
+    if (!weightedModal.rows.length) {
+      notify('error', 'Agrega al menos un curso al ciclo actual antes de activar el ponderado.')
+      return
+    }
+    if (invalid) {
+      setWeightedModal((current) => current ? { ...current, validationError: `Completa los créditos de ${invalid.name} con un valor entre 0.01 y 30.00.` } : current)
+      return
+    }
+    setWeightedModal((current) => current ? { ...current, step: 'confirm', validationError: '' } : current)
+  }
+
+  async function confirmWeightedConfiguration() {
+    if (!weightedModal || !session?.user?.id || weightedSaving) return
+    const now = new Date().toISOString()
+    setWeightedSaving(true)
+    setWeightedModal((current) => current ? { ...current, saveError: '' } : current)
+
+    const courseRows = weightedModal.rows.map((row) => ({
+      user_id: session.user.id,
+      course_id: row.courseId,
+      university_id: row.universityId,
+      faculty_id: row.facultyId,
+      career_id: row.careerId,
+      cycle_id: weightedModal.cycleId,
+      enrollment_type: row.enrollmentType,
+      status: 'visible',
+      credits: toNumber(row.credits),
+      updated_at: now
+    }))
+    const { data: savedCourses, error: coursesError } = await supabase
+      .from('student_courses')
+      .upsert(courseRows, { onConflict: 'user_id,course_id' })
+      .select('id,course_id,credits,updated_at')
+
+    if (coursesError || !savedCourses || savedCourses.length !== courseRows.length) {
+      const message = coursesError ? getErrorMessage(coursesError) : 'No se confirmaron todos los créditos guardados.'
+      setWeightedSaving(false)
+      setWeightedModal((current) => current ? { ...current, saveError: message } : current)
+      return
+    }
+
+    const { data: preference, error: preferenceError } = await supabase
+      .from('student_weighted_preferences')
+      .upsert({
+        user_id: session.user.id,
+        cycle_id: weightedModal.cycleId,
+        enabled: true,
+        confirmed_at: now,
+        updated_at: now
+      }, { onConflict: 'user_id,cycle_id' })
+      .select('*')
+      .single()
+
+    if (preferenceError || !preference) {
+      const message = preferenceError ? getErrorMessage(preferenceError) : 'No se pudo activar el ponderado.'
+      setWeightedSaving(false)
+      setWeightedModal((current) => current ? { ...current, saveError: message } : current)
+      return
+    }
+
+    weightedReconfirmationCycleRef.current = ''
+    weightedPromptedKeyRef.current = `${weightedModal.cycleId}:${weightedModal.rows.map((row) => row.courseId).sort().join(',')}`
+    setWeightedPreference(preference)
+    setWeightedPreferenceStatus('ready')
+    setWeightedPreferenceError('')
+    setWeightedModal(null)
+    setWeightedSaving(false)
+    await loadCourses()
+    await loadHistory(session.user.id)
+    notify('success', '¡Listo! Tu promedio ponderado está habilitado.')
+  }
+
+  async function disableWeightedPreference() {
+    if (!session?.user?.id || !profile?.current_cycle_id || weightedSaving) return
+    const { data, error } = await supabase
+      .from('student_weighted_preferences')
+      .update({ enabled: false, updated_at: new Date().toISOString() })
+      .eq('user_id', session.user.id)
+      .eq('cycle_id', profile.current_cycle_id)
+      .select('*')
+      .single()
+    if (error) {
+      notify('error', `No se pudo desactivar el ponderado: ${getErrorMessage(error)}`)
+      return
+    }
+    weightedPromptedKeyRef.current = ''
+    setWeightedPreference(data)
+    notify('info', 'El promedio ponderado quedó desactivado. Tus créditos y notas se conservaron.')
+  }
+
+  useEffect(() => {
+    if (!profile?.id || isAdmin || !profile.current_cycle_id || weightedPreferenceStatus !== 'ready' || !weightedPreference?.enabled) return
+    const missing = (courses || []).filter((course) => course.cycle_id === profile.current_cycle_id && !courseCreditIsConfirmed(course, weightedPreference))
+    const key = `${profile.current_cycle_id}:${missing.map((course) => course.id).sort().join(',')}`
+    if (missing.length && key !== weightedPromptedKeyRef.current && !weightedModal) {
+      weightedPromptedKeyRef.current = key
+      openWeightedConfiguration()
+    }
+    if (!missing.length) weightedPromptedKeyRef.current = ''
+    // La apertura intencional se limita al ciclo y conjunto de cursos actuales.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courses, profile?.id, profile?.current_cycle_id, weightedPreference?.enabled, weightedPreferenceStatus])
 
   async function persistGradesForCourse(courseId, gradeValues, items, template, course = null) {
     if (!session?.user?.id || !courseId) return new Error('No hay una sesión activa para guardar las calificaciones.')
@@ -2183,7 +2352,8 @@ function App() {
       notify('error', 'Los créditos deben ser mayores que 0 y menores o iguales a 30.')
       return
     }
-    if (Math.abs(credits - courseCredits(course)) < 0.001) return
+    const existingCredits = storedCourseCredits(course)
+    if (existingCredits !== null && Math.abs(credits - existingCredits) < 0.001) return
 
     const payload = {
       credits,
@@ -2259,6 +2429,12 @@ function App() {
     const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' })
     if (error) notify('error', getErrorMessage(error))
     else {
+      if (cycleChanged) {
+        weightedReconfirmationCycleRef.current = values.cycleId
+        weightedPromptedKeyRef.current = ''
+        setWeightedPreference(null)
+        setWeightedModal(null)
+      }
       if (cycleChanged) {
         const now = new Date().toISOString()
         const { error: clearCoursesError } = await supabase
@@ -2627,7 +2803,7 @@ function App() {
               />
             )}
             {(screen === 'terms' || screen === 'privacy') && <LegalDocument type={screen} onBack={() => setScreen(isAdmin ? 'admin-dashboard' : (guestMode ? 'guest-calculator' : 'dashboard'))} />}
-            {session && screen === 'dashboard' && <Dashboard profile={profile} courses={courses} history={history} announcements={announcements} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
+            {session && screen === 'dashboard' && <Dashboard profile={profile} cycles={cycles} courses={courses} history={history} announcements={announcements} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} weightedPreference={weightedPreference} weightedPreferenceStatus={weightedPreferenceStatus} weightedPreferenceError={weightedPreferenceError} onEnableWeighted={openWeightedConfiguration} onEditWeighted={openWeightedConfiguration} onDisableWeighted={disableWeightedPreference} />}
             {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onAddAll={handleAddAllStudentCourses} onHide={handleHideStudentCourse} onUpdateCredits={handleUpdateStudentCourseCredits} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
               <CalculatorScreen
@@ -2700,6 +2876,7 @@ function App() {
           onSkip={() => completeTutorial('courses')}
         />
       )}
+      {weightedModal && <WeightedConfigurationModal modal={weightedModal} cycles={cycles} university={profile?.university?.name || profile?.university?.code || 'Universidad actual'} saving={weightedSaving} onClose={() => !weightedSaving && setWeightedModal(null)} onChangeCredit={updateWeightedModalCredit} onContinue={continueWeightedConfiguration} onBack={() => setWeightedModal((current) => current ? { ...current, step: 'edit', saveError: '' } : current)} onConfirm={confirmWeightedConfiguration} />}
     </div>
   )
 }
@@ -2986,9 +3163,80 @@ function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, se
   )
 }
 
-function Dashboard({ profile, courses, history, announcements = [], setScreen, onSelectCourse }) {
+function WeightedConfigurationModal({ modal, cycles, university, saving, onClose, onChangeCredit, onContinue, onBack, onConfirm }) {
+  const isConfirm = modal.step === 'confirm'
+  const totalCredits = modal.rows.reduce((sum, row) => sum + (toNumber(row.credits) || 0), 0)
+  const changedRows = modal.rows.filter((row) => row.currentCredits === null || Math.abs((toNumber(row.credits) || 0) - row.currentCredits) > 0.001)
+  return (
+    <div className="weighted-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="weighted-modal-title">
+      <section className="weighted-modal">
+        <header className="weighted-modal-header">
+          <div>
+            <span className="eyebrow">Configuración académica</span>
+            <h2 id="weighted-modal-title">{isConfirm ? 'Confirmar actualización de créditos' : 'Configurar promedio ponderado'}</h2>
+          </div>
+          <button className="weighted-modal-close" type="button" onClick={onClose} disabled={saving} aria-label="Cerrar">×</button>
+        </header>
+        <div className="weighted-modal-body">
+          {!isConfirm ? (
+            <>
+              <p>Para calcular tu promedio ponderado, necesitamos conocer los créditos académicos de tus cursos seleccionados.</p>
+              <p>Al confirmar, los créditos ingresados serán registrados o actualizados en tu cuenta. Esta actualización no modificará tus calificaciones ni evaluaciones.</p>
+              <div className="weighted-modal-context">
+                <span><b>Universidad:</b> {university}</span>
+                <span><b>Ciclo:</b> {cycleLabel(cycles, modal.cycleId)}</span>
+                <span><b>Cursos seleccionados:</b> {modal.rows.length}</span>
+              </div>
+              <div className="weighted-course-list">
+                {modal.rows.map((row) => {
+                  const hasValue = storedCourseCredits({ credits: row.credits }) !== null
+                  return (
+                    <div className="weighted-course-row" key={row.courseId}>
+                      <div>
+                        <strong>{row.name}</strong>
+                        <small>{row.confirmed && hasValue ? 'Crédito confirmado' : row.currentCredits === null ? 'Sin crédito registrado' : 'Crédito pendiente de confirmar'}</small>
+                      </div>
+                      <label className="weighted-credit-field">
+                        <span>Créditos</span>
+                        <input className="input" inputMode="decimal" type="number" min="0.01" max="30" step="0.01" value={row.credits} onChange={(event) => onChangeCredit(row.courseId, event.target.value)} aria-label={`Créditos de ${row.name}`} />
+                      </label>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            <>
+              <p>Estás por registrar o actualizar los créditos académicos de tus cursos. Revisa la información antes de continuar.</p>
+              <div className="weighted-modal-context">
+                <span><b>Universidad:</b> {university}</span>
+                <span><b>Ciclo:</b> {cycleLabel(cycles, modal.cycleId)}</span>
+                <span><b>Cursos:</b> {modal.rows.length}</span>
+                <span><b>Créditos totales:</b> {formatNumber(totalCredits, 2)}</span>
+              </div>
+              <div className="weighted-confirm-list">
+                {modal.rows.map((row) => <div key={row.courseId}><span>{row.name}</span><b>{formatNumber(toNumber(row.credits), 2)} créditos</b></div>)}
+              </div>
+              <p className="weighted-modal-warning">Los créditos ingresados se guardarán en tu cuenta. Tus notas y evaluaciones no serán modificadas.</p>
+              {changedRows.length > 0 && <p className="weighted-modal-change-note">Se actualizarán {changedRows.length} curso{changedRows.length === 1 ? '' : 's'}.</p>}
+            </>
+          )}
+          {modal.validationError && <p className="weighted-modal-error" role="alert">{modal.validationError}</p>}
+          {modal.saveError && <p className="weighted-modal-error" role="alert">No se guardaron todos los cambios: {modal.saveError}</p>}
+        </div>
+        <footer className="weighted-modal-footer">
+          <button className="btn ghost" type="button" onClick={isConfirm ? onBack : onClose} disabled={saving}>{isConfirm ? 'Volver' : 'Cancelar'}</button>
+          {isConfirm ? <button className="btn primary" type="button" onClick={onConfirm} disabled={saving}>{saving ? 'Guardando…' : 'Confirmar y activar'}</button> : <button className="btn primary" type="button" onClick={onContinue} disabled={saving}>Continuar</button>}
+        </footer>
+      </section>
+    </div>
+  )
+}
+
+function Dashboard({ profile, cycles, courses, history, announcements = [], setScreen, onSelectCourse, weightedPreference, weightedPreferenceStatus, weightedPreferenceError, onEnableWeighted, onEditWeighted, onDisableWeighted }) {
   const visiblePageAnnouncements = announcements.filter((item) => item.display_mode !== 'modal' && !item.read?.dismissed_at)
   const featuredAnnouncement = visiblePageAnnouncements.find((item) => item.display_mode === 'banner') || visiblePageAnnouncements[0]
+  const weightedEnabled = Boolean(weightedPreference?.enabled && weightedPreference?.cycle_id === profile?.current_cycle_id)
   const weightedSummary = weightedAverageSummary(courses, history)
   const pendingWeightedCourses = Math.max(0, courses.length - weightedSummary.rows.length)
   return (
@@ -3016,7 +3264,7 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
       </div>
       <div className="cards stats-grid">
         <StatCard icon="📚" label="Mis cursos actuales" value={courses.length} />
-        <StatCard icon="⚖️" label="Promedio ponderado" value={weightedSummary.average === null ? '—' : formatNumber(weightedSummary.average)} />
+        <StatCard icon="⚖️" label="Promedio ponderado" value={!weightedEnabled ? '—' : (weightedSummary.average === null ? '—' : formatNumber(weightedSummary.average))} />
         <StatCard icon="📊" label="Resultados guardados" value={history.length} />
         <StatCard icon="🏛️" label="Universidad" value={profile?.university?.code || '—'} />
       </div>
@@ -3043,14 +3291,31 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
         )}
         {courses.length > 0 && (
           <div className="student-summary-list">
-            <div className="weighted-summary-panel">
-              <div>
-                <span>Promedio ponderado</span>
-                <strong>{weightedSummary.average === null ? '—' : formatNumber(weightedSummary.average)}</strong>
-                <small>{weightedSummary.totalCredits ? `${formatNumber(weightedSummary.totalCredits, 1)} créditos con resultado guardado` : 'Guarda resultados para calcularlo'}</small>
+            {!weightedEnabled ? (
+              <div className="weighted-opt-in-panel">
+                <div>
+                  <span>¿Quieres ver tu ponderado?</span>
+                  <p>Conoce tu promedio ponderado según tus calificaciones y los créditos académicos de tus cursos.</p>
+                  {weightedPreferenceError && <small className="weighted-error">{weightedPreferenceError}</small>}
+                </div>
+                <button className="btn primary" type="button" disabled={weightedPreferenceStatus === 'loading'} onClick={onEnableWeighted}>
+                  {weightedPreferenceStatus === 'loading' ? 'Cargando…' : 'Habilitar ponderado'}
+                </button>
               </div>
-              {pendingWeightedCourses > 0 && <p>{pendingWeightedCourses} curso{pendingWeightedCourses === 1 ? '' : 's'} aún no entra{pendingWeightedCourses === 1 ? '' : 'n'} al cálculo.</p>}
-            </div>
+            ) : (
+              <div className="weighted-summary-panel">
+                <div>
+                  <span>Promedio ponderado · {cycleLabel(cycles, profile?.current_cycle_id)}</span>
+                  <strong>{weightedSummary.average === null ? '—' : formatNumber(weightedSummary.average)}</strong>
+                  <small>{weightedSummary.totalCredits ? `${formatNumber(weightedSummary.totalCredits, 1)} créditos con resultado guardado` : 'Aún no hay resultados guardados para calcularlo'}</small>
+                </div>
+                <div className="weighted-summary-actions">
+                  {pendingWeightedCourses > 0 && <p>{pendingWeightedCourses} curso{pendingWeightedCourses === 1 ? '' : 's'} aún no entra{pendingWeightedCourses === 1 ? '' : 'n'} al cálculo.</p>}
+                  <button className="btn ghost small" type="button" onClick={onEditWeighted}>Editar créditos</button>
+                  <button className="btn ghost small" type="button" onClick={onDisableWeighted}>Desactivar</button>
+                </div>
+              </div>
+            )}
             {courses.map((course) => {
               const latest = latestHistoryForCourse(history, course.id)
               return (
@@ -3059,9 +3324,9 @@ function Dashboard({ profile, courses, history, announcements = [], setScreen, o
                     <h3>{course.name}</h3>
                     <p>{courseCycleName(course)} · {formatEnrollmentType(course.enrollment_type)} · {formatNumber(courseCredits(course), 1)} créditos</p>
                   </div>
-                  <div className="summary-status">
-                    <b>{latest ? formatNumber(latest.current_average) : 'Pendiente'}</b>
-                    <span>{latest?.status || 'Sin notas'}</span>
+                    <div className="summary-status">
+                      <b>{weightedEnabled ? (latest ? formatNumber(latest.current_average) : 'Pendiente') : '—'}</b>
+                      <span>{weightedEnabled ? (latest?.status || 'Sin notas') : 'Ponderado desactivado'}</span>
                   </div>
                   <button className="btn secondary small" onClick={() => onSelectCourse(course.id)}>Calcular</button>
                 </div>
