@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createWorker } from 'tesseract.js'
 import { REMEMBER_SESSION_KEY, supabase } from './lib/supabase'
 import { parseGradeText } from './utils/ocr'
+import { initPwaUpdates } from './pwaUpdates'
 import {
   DEFAULT_SETTINGS,
   EVALUATIONS,
@@ -20,7 +21,7 @@ import {
 } from './utils/grades'
 
 const ADMIN_EMAIL = 'oscar.miguel.huaman.cabrera@gmail.com'
-const APP_VERSION = '1.1.10-promedio-ponderado'
+const APP_VERSION = typeof __MN_BUILD_ID__ === 'string' ? __MN_BUILD_ID__ : 'dev'
 
 const GUIDED_TOUR_STEPS = [
   { screen: 'courses', target: 'course-overview', title: 'Agrega tus cursos', text: 'Este es el punto de partida. Aquí eliges únicamente los cursos que estás llevando.' },
@@ -731,6 +732,25 @@ function App() {
   useEffect(() => {
     screenRef.current = screen
   }, [screen])
+
+  useEffect(() => {
+    window.mnfUpdateGuard = async () => {
+      if (initializationRef.current || savingGradesRef.current) return false
+      if (pendingGradeSaveRef.current) return !(await flushPendingGradeSave())
+      return true
+    }
+    return () => { delete window.mnfUpdateGuard }
+    // Reemplaza el guard para que siempre use la sesión y los refs actuales.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id, selectedCourseId, evaluationTemplate?.id, evaluationItems])
+
+  useEffect(() => initPwaUpdates({
+    onUpdateStart: () => {
+      setInitializationPhase('Actualizando Mi Nota Final...')
+      setLoading(true)
+    },
+    onUpdateDeferred: () => notify('info', 'Hay cambios pendientes. La actualización se aplicará cuando sea seguro.')
+  }), [])
 
   useEffect(() => {
     const persistPendingDraft = () => {

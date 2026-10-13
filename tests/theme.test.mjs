@@ -133,3 +133,18 @@ test('el modal del flyer usa un área de imagen amplia con scroll interno', () =
   assert.match(css, /\.floating-announcement\.image-mode[\s\S]*width: min\(94vw, 760px\)/)
   assert.match(css, /\.floating-announcement-header[\s\S]*flex: 0 0 auto/)
 })
+
+test('la PWA usa un identificador de build y verifica version.json sin caché', () => {
+  const config = fs.readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8')
+  const updater = fs.readFileSync(new URL('../src/pwaUpdates.js', import.meta.url), 'utf8')
+  const vercel = fs.readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')
+  assert.match(config, /VERCEL_GIT_COMMIT_SHA/)
+  assert.match(config, /fileName: 'version\.json'/)
+  assert.match(config, /globIgnores: \['version\.json'\]/)
+  assert.match(config, /NetworkOnly/)
+  assert.match(updater, /fetch\(`\/version\.json\?check=\$\{Date\.now\(\)\}`,[\s\S]*cache: 'no-store'/)
+  assert.match(updater, /UPDATE_INTERVAL_MS = 15 \* 60 \* 1000/)
+  assert.match(updater, /mnf:last-update-attempt/)
+  assert.match(vercel, /"\/version\.json"/)
+  assert.match(vercel, /"\/index\.html"/)
+})
