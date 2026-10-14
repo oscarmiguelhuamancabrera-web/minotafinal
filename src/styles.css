@@ -1500,3 +1500,143 @@ footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: .
     grid-template-columns: 1fr;
   }
 }
+
+/* Auditoría responsive integral: límites compartidos para estudiante y administración. */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.app-container,
+.layout,
+.content,
+.page,
+.card,
+.saved-student-card,
+.saved-course-card,
+.admin-calculations-modal,
+.floating-announcement,
+.weighted-modal {
+  min-width: 0;
+}
+
+.page,
+.card,
+.list-row,
+.course-card,
+.student-course-card,
+.student-summary-row,
+.saved-student-summary,
+.saved-course-summary,
+.admin-calculation-summary {
+  overflow-wrap: anywhere;
+}
+
+.responsive-table {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.responsive-table table {
+  min-width: 620px;
+}
+
+.floating-announcement-backdrop,
+.weighted-modal-backdrop,
+.admin-calculations-backdrop {
+  overscroll-behavior: contain;
+}
+
+.admin-calculations-body,
+.weighted-modal-body,
+.floating-announcement-body,
+.floating-announcement-image-scroll {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1024px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .desktop-nav {
+    gap: 2px;
+  }
+
+  .desktop-nav button {
+    padding: 8px 9px;
+  }
+
+  .admin-access-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .grid.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .saved-student-summary,
+  .saved-course-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .admin-calculation-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .admin-access-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .saved-student-summary,
+  .saved-course-summary,
+  .admin-calculation-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .calculation-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .grid.three {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-calculation-summary > b,
+  .admin-calculation-summary .btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .responsive-table table {
+    min-width: 560px;
+  }
+
+  .admin-access-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-access-grid .btn {
+    width: 100%;
+  }
+
+  .app-container {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .topbar {
+    margin-left: -10px;
+    margin-right: -10px;
+  }
+}
