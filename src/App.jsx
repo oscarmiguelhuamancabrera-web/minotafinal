@@ -719,7 +719,7 @@ function App() {
   const [closedModalIds, setClosedModalIds] = useState([])
   const [screen, setScreen] = useState('login')
   const [guestMode, setGuestMode] = useState(false)
-  const [notice, setNotice] = useState(null)
+  const [notices, setNotices] = useState([])
   const [loading, setLoading] = useState(true)
   const [initializationPhase, setInitializationPhase] = useState('Iniciando Mi Nota Final...')
   const [initializationError, setInitializationError] = useState('')
@@ -902,8 +902,12 @@ function App() {
   }
 
   function notify(type, message) {
-    setNotice({ type, message })
-    window.setTimeout(() => setNotice(null), 5500)
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const duration = type === 'error' ? 4500 : type === 'success' ? 3500 : 3200
+    setNotices((current) => [...current, { id, type, message }].slice(-4))
+    window.setTimeout(() => {
+      setNotices((current) => current.filter((notice) => notice.id !== id))
+    }, duration)
   }
 
   async function loadUniversities() {
@@ -2717,7 +2721,11 @@ function App() {
 
   return (
     <div className="app-shell">
-      {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
+      {notices.length > 0 && (
+        <div className="toast-stack" aria-live="polite" aria-atomic="false">
+          {notices.map((notice) => <div className={`toast ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'} key={notice.id}>{notice.message}</div>)}
+        </div>
+      )}
       <ConnectionStatus />
       {initializationError && !session && !guestMode && (
         <div className="initialization-error" role="alert">
