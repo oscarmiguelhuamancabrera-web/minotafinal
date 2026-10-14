@@ -718,6 +718,7 @@ function App() {
   const [suggestions, setSuggestions] = useState([])
   const [closedModalIds, setClosedModalIds] = useState([])
   const [screen, setScreen] = useState('login')
+  const [legalDocument, setLegalDocument] = useState(null)
   const [guestMode, setGuestMode] = useState(false)
   const [notices, setNotices] = useState([])
   const [loading, setLoading] = useState(true)
@@ -908,6 +909,14 @@ function App() {
     window.setTimeout(() => {
       setNotices((current) => current.filter((notice) => notice.id !== id))
     }, duration)
+  }
+
+  function openLegalDocument(type, mandatory = false) {
+    setLegalDocument({ type, mandatory })
+  }
+
+  function closeLegalDocument() {
+    setLegalDocument(null)
   }
 
   async function loadUniversities() {
@@ -2743,14 +2752,11 @@ function App() {
             onMicrosoft={handleMicrosoftLogin}
             onRegister={() => setScreen('register')}
             onGuest={enterGuestMode}
-            onLegal={(document) => setScreen(document)}
+            onLegal={openLegalDocument}
           />
         )}
         {!session && !guestMode && screen === 'register' && (
-          <Register universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('login')} onLegal={(document) => setScreen(document)} />
-        )}
-        {!session && !guestMode && (screen === 'terms' || screen === 'privacy') && (
-          <LegalDocument type={screen} onBack={() => setScreen('login')} />
+          <Register universities={universities} faculties={faculties} careers={careers} cycles={cycles} onSubmit={handleRegister} onBack={() => setScreen('login')} onLegal={(document) => openLegalDocument(document, true)} />
         )}
         {session && screen === 'complete-profile' && (
           <CompleteProfile universities={universities} faculties={faculties} careers={careers} cycles={cycles} profile={profile} onSubmit={handleUpdateProfile} />
@@ -2766,7 +2772,7 @@ function App() {
             screen={screen}
             setScreen={setScreen}
             navItems={navItems}
-            onLegal={(document) => setScreen(document)}
+            onLegal={openLegalDocument}
             onSignOut={async () => { setGuestMode(false); await supabase.auth.signOut() }}
           >
             {guestMode && screen === 'guest-calculator' && (
@@ -2810,7 +2816,6 @@ function App() {
                 allowTemplateSelection
               />
             )}
-            {(screen === 'terms' || screen === 'privacy') && <LegalDocument type={screen} onBack={() => setScreen(isAdmin ? 'admin-dashboard' : (guestMode ? 'guest-calculator' : 'dashboard'))} />}
             {session && screen === 'dashboard' && <Dashboard profile={profile} cycles={cycles} courses={courses} history={history} announcements={announcements} setScreen={setScreen} onSelectCourse={(id) => { loadCourseGrades(id); setScreen('calculator') }} weightedPreference={weightedPreference} weightedPreferenceStatus={weightedPreferenceStatus} weightedPreferenceError={weightedPreferenceError} onEnableWeighted={openWeightedConfiguration} onEditWeighted={openWeightedConfiguration} onDisableWeighted={disableWeightedPreference} />}
             {session && screen === 'courses' && <CoursesScreen courses={courses} availableCourses={availableCourses} cycles={cycles} profile={profile} onCreate={handleCreateCourse} onAdd={handleAddStudentCourse} onAddAll={handleAddAllStudentCourses} onHide={handleHideStudentCourse} onUpdateCredits={handleUpdateStudentCourseCredits} onSelect={(id) => { loadCourseGrades(id); setScreen('calculator') }} />}
             {session && screen === 'calculator' && (
@@ -2885,6 +2890,7 @@ function App() {
         />
       )}
       {weightedModal && <WeightedConfigurationModal modal={weightedModal} cycles={cycles} university={profile?.university?.name || profile?.university?.code || 'Universidad actual'} saving={weightedSaving} onClose={() => !weightedSaving && setWeightedModal(null)} onChangeCredit={updateWeightedModalCredit} onContinue={continueWeightedConfiguration} onBack={() => setWeightedModal((current) => current ? { ...current, step: 'edit', saveError: '' } : current)} onConfirm={confirmWeightedConfiguration} />}
+      {legalDocument && <LegalDocument type={legalDocument.type} mandatory={legalDocument.mandatory} onClose={closeLegalDocument} onSwitch={(type) => openLegalDocument(type, legalDocument.mandatory)} />}
     </div>
   )
 }
@@ -5068,7 +5074,7 @@ const LEGAL_COPY = {
   },
   privacy: {
     title: 'Política de Privacidad',
-    intro: 'Este documento está preparado para revisión. Las afirmaciones sobre responsable, proveedores, conservación y canales de atención deben confirmarse antes de publicarlo como política definitiva.',
+    intro: 'Esta Política de Privacidad explica el tratamiento de los datos personales utilizado por Mi Nota Final.',
     sections: [
       ['1. Datos recopilados', 'Podemos tratar nombres, correo electrónico, datos de autenticación, universidad, facultad, carrera, ciclo, cursos, calificaciones, cálculos, actividad de uso y preferencias necesarias para operar la plataforma.'],
       ['2. Finalidades y base legal', 'Los datos se usan para autenticar, prestar la calculadora, guardar y recuperar resultados, atender solicitudes, mantener la seguridad y generar estadísticas generales. La base legal concreta y los consentimientos independientes que correspondan deben ser confirmados con asesoría legal peruana.'],
@@ -5081,17 +5087,63 @@ const LEGAL_COPY = {
   }
 }
 
-function LegalDocument({ type, onBack }) {
-  const document = LEGAL_COPY[type] || LEGAL_COPY.terms
+function LegalDocument({ type, mandatory = false, onClose, onSwitch }) {
+  const copy = LEGAL_COPY[type] || LEGAL_COPY.terms
+  const dialogRef = useRef(null)
+  const closeButtonRef = useRef(null)
+
+  useEffect(() => {
+    const previousFocus = document.activeElement
+    closeButtonRef.current?.focus()
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !mandatory) {
+        event.preventDefault()
+        onClose?.()
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const focusable = [...dialogRef.current.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.disabled && element.offsetParent !== null)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    document.body.classList.add('legal-modal-open')
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.body.classList.remove('legal-modal-open')
+      if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus()
+    }
+  }, [mandatory, onClose])
+
   return (
-    <section className="legal-page fade-in">
-      <button className="back" onClick={onBack}>← Volver</button>
-      <p className="eyebrow">Documento para revisión</p>
-      <h1>{document.title}</h1>
-      <p className="legal-intro">{document.intro}</p>
-      {document.sections.map(([heading, text]) => <article key={heading}><h2>{heading}</h2><p>{text}</p></article>)}
-      <div className="legal-actions"><button className="btn secondary" onClick={onBack}>Volver al inicio de sesión</button></div>
-    </section>
+    <div className="legal-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="legal-modal-title">
+      <section className="legal-modal" ref={dialogRef}>
+        <header className="legal-modal-header">
+          <h1 id="legal-modal-title">{copy.title}</h1>
+          <button ref={closeButtonRef} type="button" className="legal-modal-close" onClick={onClose} aria-label="Cerrar documento">×</button>
+        </header>
+        <div className="legal-modal-body">
+          <p className="legal-intro">{copy.intro}</p>
+          {copy.sections.map(([heading, text]) => <article key={heading}><h2>{heading}</h2><p>{text}</p></article>)}
+          <div className="legal-modal-links">
+            <button type="button" className="inline-link" onClick={() => onSwitch?.('terms')}>Términos y Condiciones</button>
+            <button type="button" className="inline-link" onClick={() => onSwitch?.('privacy')}>Política de Privacidad</button>
+          </div>
+        </div>
+        <footer className="legal-modal-footer">
+          <button type="button" className="btn secondary" onClick={onClose}>Cerrar</button>
+        </footer>
+      </section>
+    </div>
   )
 }
 
