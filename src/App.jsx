@@ -1934,28 +1934,6 @@ function App() {
     else notify('success', 'Te enviamos un enlace para recuperar tu contraseña. Revisa tu correo.')
   }
 
-  async function enterGuestMode() {
-    setGuestMode(true)
-    setProfile(null)
-    const guestSettings = loadGuestSettings()
-    setSettings(guestSettings)
-    setCourses([])
-    setAvailableCourses([])
-    setSelectedCourseId('')
-    setResult(null)
-    setScreen('guest-calculator')
-
-    const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
-    const defaultTemplate = templates.find((template) => template.university?.code === 'UPSJB') || templates[0]
-    if (defaultTemplate?.id) {
-      await applyEvaluationTemplate(defaultTemplate.id)
-    } else {
-      const fallback = normalizeEvaluationComponents([], guestSettings)
-      setEvaluationTemplate(null)
-      setEvaluationItems(fallback)
-      setGrades(emptyDynamicGrades(fallback))
-    }
-  }
 
   function handleCalculate() {
     const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
@@ -2754,7 +2732,6 @@ function App() {
             onGoogle={handleGoogleLogin}
             onMicrosoft={handleMicrosoftLogin}
             onRegister={() => setScreen('register')}
-            onGuest={enterGuestMode}
             onLegal={openLegalDocument}
           />
         )}
@@ -2911,7 +2888,7 @@ function Splash({ phase = 'Verificando sesión...' }) {
   )
 }
 
-function Welcome({ onLogin, onRegister, onGuest, onGoogle, onMicrosoft }) {
+function Welcome({ onLogin, onRegister, onGoogle, onMicrosoft }) {
   return (
     <section className="welcome-card">
       <img className="brand-logo" src="/logo.png" alt="Mi Nota Final" />
@@ -2922,7 +2899,6 @@ function Welcome({ onLogin, onRegister, onGuest, onGoogle, onMicrosoft }) {
         <SocialButton provider="microsoft" onClick={onMicrosoft}>Continuar con Microsoft</SocialButton>
         <button className="btn secondary" onClick={onLogin}>✉️ Iniciar sesión con correo</button>
         <button className="btn ghost" onClick={onRegister}>Crear cuenta</button>
-        <button className="btn link" onClick={onGuest}>Continuar como invitado</button>
       </div>
       <Footer />
     </section>
@@ -3023,7 +2999,7 @@ function GuidedTour({ step, stepIndex, totalSteps, onBack, onNext, onSkip }) {
   )
 }
 
-function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest, onLegal }) {
+function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onLegal }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [rememberSession, setRememberSession] = useState(() => {
@@ -3069,7 +3045,6 @@ function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onGuest, 
         <button className="btn link" onClick={() => onReset(email)}>Olvidé mi contraseña</button>
         <button className="btn link" onClick={onRegister}>Crear cuenta nueva</button>
       </div>
-      <button className="btn ghost full" onClick={onGuest}>Continuar como invitado</button>
     </AuthCard>
   )
 }

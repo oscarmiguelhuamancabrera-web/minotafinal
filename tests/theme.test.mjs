@@ -164,3 +164,10 @@ test('las estadísticas respetan el cambio de día de America/Lima', () => {
   assert.equal(isWithinPeruPeriod(new Date('2026-10-13T00:30:00Z'), 'today', beforeUtc), true)
   assert.equal(isWithinPeruPeriod(new Date('2026-10-13T05:00:00Z'), 'today', beforeUtc), false)
 })
+
+test('el build de producción no expone acceso demo o invitado', () => {
+  const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(app, /Continuar como invitado/)
+  assert.doesNotMatch(app, /onGuest/)
+  assert.doesNotMatch(app, /enterGuestMode/)
+})
