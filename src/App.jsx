@@ -1351,13 +1351,13 @@ function App() {
 
     let studentRes = await supabase
       .from('student_courses')
-      .select(`id,enrollment_type,status,credits,updated_at,course_id,course:courses!inner(${COURSE_SELECT})`)
+      .select(`id,enrollment_type,status,credits,credits_confirmed_at,updated_at,course_id,course:courses!inner(${COURSE_SELECT})`)
       .eq('user_id', userProfile.id)
       .eq('status', 'visible')
       .eq('cycle_id', userProfile.current_cycle_id)
       .eq('course.status', 'active')
 
-    if (studentRes.error && String(studentRes.error.message || '').toLowerCase().includes('credits')) {
+    if (studentRes.error && /credits|credits_confirmed_at/i.test(String(studentRes.error.message || ''))) {
       studentRes = await supabase
         .from('student_courses')
         .select(`id,enrollment_type,status,updated_at,course_id,course:courses!inner(${COURSE_SELECT})`)
@@ -1373,6 +1373,7 @@ function App() {
           ...row.course,
           student_course_id: row.id,
           student_course_updated_at: row.updated_at,
+          credits_confirmed_at: row.credits_confirmed_at || null,
           enrollment_type: row.enrollment_type || 'regular',
           credits: row.credits ?? 1,
           student_course_status: row.status || 'visible'
@@ -1503,12 +1504,13 @@ function App() {
       enrollment_type: row.enrollmentType,
       status: 'visible',
       credits: toNumber(row.credits),
+      credits_confirmed_at: now,
       updated_at: now
     }))
     const { data: savedCourses, error: coursesError } = await supabase
       .from('student_courses')
       .upsert(courseRows, { onConflict: 'user_id,course_id' })
-      .select('id,course_id,credits,updated_at')
+      .select('id,course_id,credits,credits_confirmed_at,updated_at')
 
     if (coursesError || !savedCourses || savedCourses.length !== courseRows.length) {
       const message = coursesError ? getErrorMessage(coursesError) : 'No se confirmaron todos los créditos guardados.'
@@ -2370,6 +2372,7 @@ function App() {
 
     const payload = {
       credits,
+      credits_confirmed_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
 
@@ -2395,7 +2398,7 @@ function App() {
 
     const { error } = await query
     if (error) {
-      const message = String(error.message || '').toLowerCase().includes('credits')
+      const message = /credits|credits_confirmed_at/i.test(String(error.message || ''))
         ? 'Ejecuta la migración v1.1.10 para habilitar créditos por curso.'
         : getErrorMessage(error)
       notify('error', message)

@@ -8,7 +8,7 @@ export function storedCourseCredits(course) {
 export function courseCreditIsConfirmed(course, preference) {
   const credits = storedCourseCredits(course)
   if (credits === null || !preference?.confirmed_at) return false
-  const updatedAt = course?.student_course_updated_at || course?.updated_at
+  const updatedAt = course?.credits_confirmed_at || course?.student_course_updated_at || course?.updated_at
   if (!updatedAt) return true
   return new Date(updatedAt).getTime() <= new Date(preference.confirmed_at).getTime()
 }
