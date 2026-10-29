@@ -1,0 +1,48 @@
+{
+  "id": "halloween-2026",
+  "name": "Halloween 2026",
+  "type": "seasonal",
+  "version": "1.0.0",
+  "enabled": true,
+  "priority": 100,
+  "startAt": "2026-10-22T00:00:00-05:00",
+  "endAt": "2026-11-01T00:00:00-05:00",
+  "timeZone": "America/Lima",
+  "appearance": "dark",
+  "preserveUserPreference": true,
+  "restoreOriginalTheme": true,
+  "animations": {
+    "enabled": true,
+    "reducedMotionSupport": true
+  },
+  "effects": {
+    "bats": {
+      "enabled": true,
+      "desktopCount": 3,
+      "tabletCount": 2,
+      "mobileCount": 1,
+      "speed": "slow",
+      "layer": "background"
+    },
+    "spiderWebs": {
+      "enabled": true,
+      "animation": "subtle-sway",
+      "intensity": "low"
+    },
+    "accessibility": {
+      "reducedMotion": true
+    }
+  },
+  "visual": {
+    "className": "theme-halloween-2026",
+    "assets": {
+      "heroIllustration": "/themes/halloween-2026/hero-illustration-desktop.webp",
+      "heroIllustrationMobile": "/themes/halloween-2026/hero-illustration-mobile.webp",
+      "heroScene": "/themes/halloween-2026/hero-scene.svg",
+      "heroForeground": "/themes/halloween-2026/hero-foreground.svg",
+      "miniPumpkin": "/themes/halloween-2026/mini-pumpkin.svg",
+      "cornerWeb": "/themes/halloween-2026/web-corners.svg"
+    },
+    "decorations": ["moon", "castle", "bats", "pumpkins", "trees", "lanterns", "ghosts"]
+  }
+}

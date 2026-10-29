@@ -1,0 +1,19 @@
+{
+  "id": "original",
+  "name": "Mi Nota Final",
+  "type": "base",
+  "version": "1.0.0",
+  "enabled": true,
+  "appearance": "user",
+  "preserveUserPreference": true,
+  "restoreOriginalTheme": true,
+  "visual": {
+    "assets": {
+      "heroIllustration": "/themes/original/hero-illustration.svg"
+    }
+  },
+  "animations": {
+    "enabled": true,
+    "reducedMotionSupport": true
+  }
+}

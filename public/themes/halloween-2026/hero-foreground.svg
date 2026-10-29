@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" role="img" aria-label="Calabazas y símbolos académicos de Halloween">
+  <defs>
+    <linearGradient id="pumpkin" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffab43"/><stop offset=".55" stop-color="#f36b28"/><stop offset="1" stop-color="#9f3034"/></linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#28184a"/><stop offset="1" stop-color="#0e0a23"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <g transform="translate(386 232) rotate(-8)">
+    <rect width="210" height="142" rx="19" fill="url(#paper)" stroke="#9452d2" stroke-width="3"/>
+    <path d="M40 53h128M40 78h104M40 103h82" stroke="#7543a7" stroke-width="10" stroke-linecap="round"/>
+    <path d="m44 29 9 10 20-24" fill="none" stroke="#c66cff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M23 0h74l-13 16H36Z" fill="#32136d" stroke="#f28a44" stroke-width="2"/>
+    <path d="M58 14v33" stroke="#ffaf45" stroke-width="3"/><circle cx="58" cy="51" r="6" fill="#ffaf45"/>
+  </g>
+  <g transform="translate(220 322)">
+    <path d="M0 58c17-31 27-49 58-61 29 14 48 31 57 61Z" fill="#20102e"/>
+    <g fill="url(#pumpkin)" stroke="#7e2e31" stroke-width="2">
+      <ellipse cx="45" cy="67" rx="43" ry="35"/><ellipse cx="73" cy="67" rx="41" ry="35"/>
+    </g>
+    <path d="M60 36c-6-20 5-29 17-33l6 12c-9 4-12 11-10 22Z" fill="#507439"/>
+    <g fill="#281025" filter="url(#glow)"><path d="m39 59 9 0-4 12Z"/><path d="m68 59 9 0-4 12Z"/><path d="M41 78c11 9 22 9 34 0-3 15-29 16-34 0Z"/></g>
+  </g>
+  <g transform="translate(552 286)" opacity=".94">
+    <rect x="0" y="33" width="90" height="74" rx="18" fill="#22143c" stroke="#7448b3" stroke-width="3"/>
+    <rect x="13" y="47" width="14" height="40" rx="6" fill="#7f3fe2"/><rect x="37" y="36" width="14" height="51" rx="6" fill="#aa54ec"/><rect x="61" y="25" width="14" height="62" rx="6" fill="#cb66ee"/>
+  </g>
+  <g transform="translate(620 220)" opacity=".96">
+    <path d="M9 24c0-16 13-24 29-24s29 8 29 24v42c0 14-13 25-29 25S9 80 9 66Z" fill="#9b78f5"/>
+    <path d="M0 28 10 8l10 16L30 4l11 20L53 6l14 21-6 8H8Z" fill="#ef8b40"/>
+    <circle cx="27" cy="47" r="4" fill="#21113b"/><circle cx="48" cy="47" r="4" fill="#21113b"/><path d="M28 60c8 7 15 7 22 0" fill="none" stroke="#21113b" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>

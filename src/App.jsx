@@ -6,6 +6,8 @@ import { APP_TIME_ZONE, formatPeruHour, isWithinPeruPeriod as isWithinPeriod, to
 import { initPwaUpdates } from './pwaUpdates'
 import PwaInstallButton from './components/PwaInstallButton'
 import ConnectionStatus from './components/ConnectionStatus'
+import { useTheme } from './components/ThemeProvider.jsx'
+import HalloweenHeroBats from './themes/halloween-2026/components/HalloweenHeroBats.jsx'
 import { courseCreditIsConfirmed, storedCourseCredits, weightedAverageSummary } from './utils/weighted'
 import {
   DEFAULT_SETTINGS,
@@ -3226,6 +3228,11 @@ function WeightedConfigurationModal({ modal, cycles, university, saving, onClose
 }
 
 function Dashboard({ profile, cycles, courses, history, announcements = [], setScreen, onSelectCourse, weightedPreference, weightedPreferenceStatus, weightedPreferenceError, onEnableWeighted, onEditWeighted, onDisableWeighted }) {
+  const { activeTheme } = useTheme()
+  const halloweenActive = activeTheme?.id === 'halloween-2026'
+  const heroAssets = activeTheme?.visual?.assets || {}
+  const heroIllustration = heroAssets.heroIllustration || '/themes/original/hero-illustration.svg'
+  const heroIllustrationMobile = heroAssets.heroIllustrationMobile || ''
   const visiblePageAnnouncements = announcements.filter((item) => item.display_mode !== 'modal' && !item.read?.dismissed_at)
   const featuredAnnouncement = visiblePageAnnouncements.find((item) => item.display_mode === 'banner') || visiblePageAnnouncements[0]
   const weightedEnabled = Boolean(weightedPreference?.enabled && weightedPreference?.cycle_id === profile?.current_cycle_id)
@@ -3234,6 +3241,7 @@ function Dashboard({ profile, cycles, courses, history, announcements = [], setS
   return (
     <div className="page fade-in">
       <div className="hero-panel dashboard-hero">
+        <HalloweenHeroBats active={halloweenActive} effects={activeTheme?.effects} />
         <div className="hero-copy">
           <p className="eyebrow">Tu espacio académico</p>
           <h1>Hola, {firstWord(profile?.first_name || profile?.full_name)} <span className="hero-wave" aria-hidden="true">👋</span></h1>
@@ -3245,14 +3253,23 @@ function Dashboard({ profile, cycles, courses, history, announcements = [], setS
             <button className="btn hero-profile-link" onClick={() => setScreen('profile')}>↗ Cambiar perfil académico</button>
           </div>
         </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="hero-orb hero-orb-one" />
-          <div className="hero-orb hero-orb-two" />
-          <div className="hero-student-card"><span>✓</span><i /><i /><i /></div>
-          <div className="hero-cap">🎓</div>
-          <div className="hero-graph"><b /><b /><b /><b /></div>
-          <div className="hero-doodle">Pequeños<br />cálculos,<br /><strong>grandes logros</strong></div>
-        </div>
+        {halloweenActive ? (
+          <div className="hero-illustration-slot" aria-label="Ilustración de Halloween 2026" role="img">
+            <picture className="hero-illustration-picture">
+              {heroIllustrationMobile && <source media="(max-width: 820px)" srcSet={heroIllustrationMobile} type={heroIllustrationMobile.endsWith('.webp') ? 'image/webp' : undefined} />}
+              <img className="hero-illustration" src={heroIllustration} alt="" aria-hidden="true" decoding="async" fetchPriority="high" />
+            </picture>
+          </div>
+        ) : (
+          <div className="hero-visual" aria-hidden="true">
+            <div className="hero-orb hero-orb-one" />
+            <div className="hero-orb hero-orb-two" />
+            <div className="hero-student-card"><span>✓</span><i /><i /><i /></div>
+            <div className="hero-cap">🎓</div>
+            <div className="hero-graph"><b /><b /><b /><b /></div>
+            <div className="hero-doodle">Pequeños<br />cálculos,<br /><strong>grandes logros</strong></div>
+          </div>
+        )}
       </div>
       <div className="cards stats-grid">
         <StatCard icon="📚" label="Mis cursos actuales" value={courses.length} />

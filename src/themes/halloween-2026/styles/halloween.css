@@ -1,0 +1,807 @@
+/* Decorative layer for the seasonal theme. It never captures pointer input. */
+.theme-halloween-ornaments {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: #f8d26b;
+}
+.app-shell:has(.theme-halloween-ornaments),
+.layout:has(.theme-halloween-ornaments) { position: relative; z-index: 1; }
+:root[data-theme-id="halloween-2026"] {
+  --purple: #d8a6ff;
+  --purple-dark: #f2ddff;
+  --purple-soft: #30204f;
+  --purple-border: #704a96;
+  --ink: #fbf4ff;
+  --muted: #c8b9d8;
+  --surface: #1c1430;
+  --bg: #0d0719;
+  --page-start: #160b2b;
+  --surface-glass: rgba(27, 16, 50, .93);
+  --surface-subtle: #21133b;
+  --surface-accent: #34204f;
+  --surface-disabled: #201631;
+  --border: #543675;
+  --border-glass: rgba(121, 77, 158, .66);
+  --control-bg: #24163d;
+  --control-border: #86629f;
+  --accent-text: #ffd27e;
+  --accent-border: #a86c4f;
+  --accent-wash: rgba(255, 132, 56, .16);
+  --text-primary: #fbf4ff;
+  --text-secondary: #c8b9d8;
+  --on-brand: #fff6e7;
+  --brand-start: #6c2e9d;
+  --brand-end: #b64d45;
+  --activity-start: #ff9e49;
+  --activity-end: #d58bff;
+  --shadow: 0 24px 74px rgba(7, 2, 18, .58);
+  --shadow-local: 0 13px 38px rgba(6, 2, 15, .42);
+  color-scheme: dark;
+}
+:root[data-theme-id="halloween-2026"] body {
+  background:
+    radial-gradient(circle at 72% -8%, rgba(137, 70, 192, .42), transparent 30rem),
+    radial-gradient(circle at 4% 100%, rgba(255, 98, 41, .16), transparent 26rem),
+    linear-gradient(135deg, #0d0719, #21113c 52%, #140a27);
+}
+:root[data-theme-id="halloween-2026"] .topbar,
+:root[data-theme-id="halloween-2026"] .card,
+:root[data-theme-id="halloween-2026"] .hero-panel,
+:root[data-theme-id="halloween-2026"] .auth-card,
+:root[data-theme-id="halloween-2026"] .welcome-card {
+  border-color: rgba(155, 104, 183, .58);
+  box-shadow: 0 17px 44px rgba(4, 2, 13, .42), inset 0 1px 0 rgba(255, 210, 126, .05);
+}
+:root[data-theme-id="halloween-2026"] .hero-panel {
+  background: linear-gradient(115deg, rgba(28, 18, 52, .97), rgba(52, 25, 69, .93) 62%, rgba(81, 33, 63, .92));
+}
+:root[data-theme-id="halloween-2026"] .btn.primary {
+  background: linear-gradient(135deg, #7b35a9, #bc5346);
+  border-color: #c87650;
+  box-shadow: 0 12px 27px rgba(181, 75, 63, .28);
+}
+:root[data-theme-id="halloween-2026"] .halloween-moon {
+  position: absolute;
+  top: 8vh;
+  right: 9vw;
+  width: clamp(84px, 10vw, 145px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #ffe7a2;
+  box-shadow: 0 0 28px 8px rgba(255, 218, 129, .36), 0 0 100px rgba(202, 117, 255, .24);
+}
+:root[data-theme-id="halloween-2026"] .halloween-moon::after {
+  content: '';
+  position: absolute;
+  inset: -5px 13px 7px -8px;
+  border-radius: 50%;
+  background: #1c1033;
+}
+.halloween-bat {
+  position: absolute;
+  width: clamp(68px, 9vw, 132px);
+  fill: #10091e;
+  filter: drop-shadow(0 4px 5px rgba(0, 0, 0, .34));
+  animation: halloween-bat-drift 12s ease-in-out infinite;
+}
+.halloween-bat-one { top: 14%; left: 15%; }
+.halloween-bat-two { top: 26%; right: 24%; width: clamp(46px, 6vw, 92px); animation-delay: -5s; opacity: .82; }
+.halloween-ghost {
+  position: absolute;
+  left: 4vw;
+  bottom: 19vh;
+  width: clamp(42px, 5vw, 68px);
+  aspect-ratio: .74;
+  border-radius: 48% 48% 18% 18%;
+  background: rgba(231, 207, 255, .2);
+  box-shadow: 0 0 22px rgba(218, 181, 255, .2);
+  animation: halloween-ghost-float 7s ease-in-out infinite;
+}
+.halloween-ghost::after { content: ''; position: absolute; left: 0; right: 0; bottom: -8px; height: 17px; background: inherit; clip-path: polygon(0 0, 20% 60%, 40% 0, 60% 60%, 80% 0, 100% 60%, 100% 100%, 0 100%); }
+.halloween-ghost i { position: relative; display: inline-block; width: 7px; height: 9px; margin: 17px 0 0 9px; border-radius: 50%; background: #201131; }
+.halloween-ghost i + i { margin-left: 5px; }
+.halloween-ghost i:last-child { display: block; width: 9px; height: 13px; margin: 6px auto 0; }
+.halloween-pumpkin { position: absolute; right: 4vw; bottom: 5vh; width: clamp(56px, 7vw, 100px); height: clamp(48px, 6vw, 82px); border-radius: 50%; background: linear-gradient(90deg, #8b342e, #ea7a38 35%, #9d3f2f 70%, #ef8740); box-shadow: 0 0 20px rgba(255, 115, 50, .3); animation: halloween-pumpkin-glow 3.6s ease-in-out infinite; }
+.halloween-pumpkin::before, .halloween-pumpkin::after { content: ''; position: absolute; top: 3px; bottom: 2px; width: 35%; border: 2px solid rgba(73, 24, 28, .45); border-top: 0; border-bottom: 0; border-radius: 50%; }
+.halloween-pumpkin::before { left: 14%; } .halloween-pumpkin::after { right: 14%; }
+.halloween-pumpkin i { position: absolute; left: 46%; top: -9px; width: 12px; height: 15px; border-radius: 5px 5px 0 0; background: #5f8b43; transform: rotate(8deg); }
+.halloween-pumpkin b { position: absolute; top: 23px; width: 11px; height: 12px; background: #291327; clip-path: polygon(50% 100%, 0 0, 100% 0); }
+.halloween-pumpkin b:nth-of-type(1) { left: 24%; } .halloween-pumpkin b:nth-of-type(2) { right: 24%; } .halloween-pumpkin b:nth-of-type(3) { left: 40%; top: 39px; width: 22px; height: 9px; clip-path: polygon(0 0, 22% 80%, 50% 0, 78% 80%, 100% 0, 85% 100%, 15% 100%); }
+.halloween-pumpkin-two { right: auto; left: 9vw; bottom: 4vh; transform: scale(.66); animation-delay: -1.4s; }
+.halloween-mist { position: absolute; left: -10vw; right: -10vw; bottom: 0; height: 18vh; background: radial-gradient(ellipse at center, rgba(153, 110, 205, .16), transparent 68%); filter: blur(12px); opacity: .6; }
+.halloween-mist-two { bottom: 11vh; opacity: .35; transform: scaleX(.7); }
+@keyframes halloween-bat-drift { 0%, 100% { transform: translate(0, 0) rotate(-2deg); } 50% { transform: translate(18px, 9px) rotate(4deg); } }
+@keyframes halloween-ghost-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-13px); } }
+@keyframes halloween-pumpkin-glow { 0%, 100% { filter: brightness(.93); } 50% { filter: brightness(1.12); } }
+@media (max-width: 820px) {
+  .halloween-moon { top: 9vh; right: 7vw; }
+  .halloween-bat-one { top: 19%; left: 6%; }
+  .halloween-bat-two { top: 30%; right: 9%; }
+  .halloween-pumpkin { bottom: 13vh; right: 1vw; transform: scale(.7); }
+  .halloween-pumpkin-two { left: -3vw; bottom: 10vh; transform: scale(.48); }
+  .halloween-ghost { left: -4vw; bottom: 27vh; transform: scale(.68); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .halloween-bat, .halloween-ghost, .halloween-pumpkin { animation: none; }
+}
+
+/* Ambient motion is kept inside the hero bounds. The layer never receives
+   pointer input and sits below the real academic content. */
+:root[data-theme-id="halloween-2026"] .halloween-hero-bats {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+:root[data-theme-id="halloween-2026"] .hero-panel > .halloween-hero-bats {
+  position: absolute;
+  /* Above the panel background, below the real hero copy and illustration. */
+  z-index: 1;
+}
+/* Login is the one full-screen surface where the ambient layer needs to sit
+   above the app shell; the bats remain low-opacity and pointer-transparent. */
+:root[data-theme-id="halloween-2026"] body:has(.login-card) .theme-halloween-ornaments {
+  z-index: 2;
+}
+:root[data-theme-id="halloween-2026"] .halloween-hero-bat {
+  position: absolute;
+  width: clamp(52px, 7vw, 102px);
+  height: auto;
+  fill: #3a2058;
+  opacity: .3;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .3));
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+  animation: halloween-hero-bat-flight-one 15s ease-in-out infinite;
+}
+:root[data-theme-id="halloween-2026"] .halloween-hero-bat-one {
+  top: 14%;
+  left: 50%;
+}
+:root[data-theme-id="halloween-2026"] .halloween-hero-bat-two {
+  top: 25%;
+  right: 9%;
+  width: clamp(40px, 5.5vw, 78px);
+  opacity: .19;
+  animation-name: halloween-hero-bat-flight-two;
+  animation-duration: 19s;
+  animation-delay: -7s;
+}
+:root[data-theme-id="halloween-2026"] .halloween-hero-bat-three {
+  top: 10%;
+  right: 30%;
+  width: clamp(34px, 4.6vw, 67px);
+  opacity: .15;
+  animation-name: halloween-hero-bat-flight-three;
+  animation-duration: 22s;
+  animation-delay: -11s;
+}
+@keyframes halloween-hero-bat-flight-one {
+  0%, 100% { transform: translate3d(-10px, 2px, 0) rotate(-3deg); opacity: .18; }
+  48% { transform: translate3d(24px, -7px, 0) rotate(4deg); opacity: .28; }
+  72% { transform: translate3d(39px, 8px, 0) rotate(1deg); opacity: .22; }
+}
+@keyframes halloween-hero-bat-flight-two {
+  0%, 100% { transform: translate3d(10px, 0, 0) rotate(3deg); opacity: .14; }
+  50% { transform: translate3d(-25px, 13px, 0) rotate(-5deg); opacity: .22; }
+}
+@keyframes halloween-hero-bat-flight-three {
+  0%, 100% { transform: translate3d(0, 6px, 0) rotate(-2deg); opacity: .11; }
+  50% { transform: translate3d(-18px, -10px, 0) rotate(5deg); opacity: .18; }
+}
+
+/* The hero keeps the configured desktop/tablet/mobile density without
+   changing the illustration slot or pushing the academic content. */
+@media (max-width: 820px) {
+  :root[data-theme-id="halloween-2026"] .halloween-hero-bat-three { display: none; }
+  :root[data-theme-id="halloween-2026"] .halloween-hero-bat-one {
+    left: 46%;
+    width: clamp(42px, 11vw, 74px);
+  }
+  :root[data-theme-id="halloween-2026"] .halloween-hero-bat-two {
+    right: 7%;
+    width: clamp(34px, 8vw, 58px);
+  }
+}
+@media (max-width: 520px) {
+  :root[data-theme-id="halloween-2026"] .halloween-hero-bat-two { display: none; }
+  :root[data-theme-id="halloween-2026"] .halloween-hero-bat-one {
+    top: 11%;
+    left: 58%;
+    width: 48px;
+    opacity: .14;
+  }
+}
+
+/* The existing corner-web artwork is reused and given a barely perceptible
+   sway. Each surface has its own timing so the page does not move in lockstep. */
+:root[data-theme-id="halloween-2026"] .topbar::before {
+  animation: halloween-web-sway-left 12s ease-in-out -3s infinite;
+  transform-origin: top left;
+}
+:root[data-theme-id="halloween-2026"] .topbar::after {
+  animation: halloween-web-sway-right 14s ease-in-out -8s infinite;
+  transform-origin: top right;
+}
+:root[data-theme-id="halloween-2026"] .hero-panel::after {
+  animation: halloween-web-sway-left 16s ease-in-out -6s infinite;
+  transform-origin: top left;
+}
+:root[data-theme-id="halloween-2026"] .card::after {
+  animation: halloween-web-sway-right 13s ease-in-out -4s infinite;
+  transform-origin: top right;
+}
+:root[data-theme-id="halloween-2026"] .auth-card,
+:root[data-theme-id="halloween-2026"] .welcome-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+:root[data-theme-id="halloween-2026"] .auth-card::after,
+:root[data-theme-id="halloween-2026"] .welcome-card::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  top: -1px;
+  right: -1px;
+  width: 94px;
+  height: 82px;
+  background: url('/themes/halloween-2026/web-corners.svg') no-repeat top right / 82px auto;
+  opacity: .08;
+  pointer-events: none;
+  animation: halloween-web-sway-right 15s ease-in-out -10s infinite;
+  transform-origin: top right;
+}
+:root[data-theme-id="halloween-2026"] .auth-card > *,
+:root[data-theme-id="halloween-2026"] .welcome-card > * {
+  position: relative;
+  z-index: 1;
+}
+@keyframes halloween-web-sway-left {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: .14; }
+  50% { transform: translate3d(1px, 1px, 0) rotate(1.2deg); opacity: .19; }
+}
+@keyframes halloween-web-sway-right {
+  0%, 100% { transform: scaleX(-1) translate3d(0, 0, 0) rotate(0deg); opacity: .12; }
+  50% { transform: scaleX(-1) translate3d(1px, 1px, 0) rotate(-1.2deg); opacity: .17; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme-id="halloween-2026"] .halloween-hero-bat,
+  :root[data-theme-id="halloween-2026"] .topbar::before,
+  :root[data-theme-id="halloween-2026"] .topbar::after,
+  :root[data-theme-id="halloween-2026"] .hero-panel::after,
+  :root[data-theme-id="halloween-2026"] .card::after,
+  :root[data-theme-id="halloween-2026"] .halloween-web-thread,
+  :root[data-theme-id="halloween-2026"] .auth-card::after,
+  :root[data-theme-id="halloween-2026"] .welcome-card::after {
+    animation: none;
+  }
+}
+
+/* Composición aprobada: los recursos se montan dentro de los contenedores de la
+   interfaz original. Así la escena no flota fuera del panel ni tapa los datos. */
+:root[data-theme-id="halloween-2026"] .theme-halloween-ornaments {
+  z-index: 0;
+}
+:root[data-theme-id="halloween-2026"] .theme-halloween-ornaments > :is(.halloween-moon, .halloween-bat, .halloween-ghost, .halloween-pumpkin, .halloween-mist) {
+  display: none;
+}
+:root[data-theme-id="halloween-2026"] body {
+  background:
+    radial-gradient(circle at 15% 12%, rgba(111, 53, 172, .25), transparent 29rem),
+    radial-gradient(circle at 92% 75%, rgba(244, 88, 54, .10), transparent 25rem),
+    linear-gradient(135deg, #0b081b 0%, #17102e 54%, #100a25 100%);
+}
+
+:root[data-theme-id="halloween-2026"] .topbar {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: linear-gradient(105deg, rgba(20, 13, 47, .96), rgba(19, 13, 42, .9));
+}
+:root[data-theme-id="halloween-2026"] .topbar::before,
+:root[data-theme-id="halloween-2026"] .topbar::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  width: 104px;
+  height: 94px;
+  z-index: -1;
+  background: url('/themes/halloween-2026/web-corners.svg') no-repeat top left / 104px auto;
+  opacity: .16;
+  pointer-events: none;
+}
+:root[data-theme-id="halloween-2026"] .halloween-web-thread {
+  position: absolute;
+  top: 5vh;
+  left: 1vw;
+  width: 74px;
+  height: 118px;
+  background: url('/themes/halloween-2026/web-corners.svg') no-repeat top left / 74px auto;
+  opacity: .08;
+  transform-origin: top left;
+  animation: halloween-web-sway-left 17s ease-in-out -9s infinite;
+}
+:root[data-theme-id="halloween-2026"] .topbar::before { left: -1px; }
+:root[data-theme-id="halloween-2026"] .topbar::after { right: -1px; transform: scaleX(-1); }
+:root[data-theme-id="halloween-2026"] .topbar > * { position: relative; z-index: 1; }
+:root[data-theme-id="halloween-2026"] .topbar .brand-inline strong,
+:root[data-theme-id="halloween-2026"] .topbar .brand-inline span { text-shadow: 0 1px 12px rgba(12, 5, 28, .7); }
+
+:root[data-theme-id="halloween-2026"] .hero-panel {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 360px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(330px, .9fr);
+  align-items: center;
+  padding: 34px 48px;
+  border: 1px solid rgba(158, 92, 197, .62);
+  background-color: #130d2b;
+  background-image: linear-gradient(110deg, rgba(16, 10, 38, .99) 0%, rgba(22, 12, 47, .97) 54%, rgba(36, 18, 56, .9) 100%);
+  box-shadow: 0 20px 48px rgba(5, 2, 17, .48), inset 0 0 0 1px rgba(243, 150, 255, .04);
+}
+:root[data-theme-id="halloween-2026"] .hero-panel::before {
+  display: none;
+}
+:root[data-theme-id="halloween-2026"] .hero-panel::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: auto;
+  height: auto;
+  border-radius: inherit;
+  background: url('/themes/halloween-2026/web-corners.svg') no-repeat left top / 116px auto;
+  opacity: .16;
+  pointer-events: none;
+}
+:root[data-theme-id="halloween-2026"] .hero-panel > * { position: relative; z-index: 1; }
+:root[data-theme-id="halloween-2026"] .hero-panel .hero-copy { width: 100%; max-width: 560px; }
+:root[data-theme-id="halloween-2026"] .hero-panel > .hero-copy {
+  max-width: 560px;
+  width: 100%;
+  text-shadow: 0 2px 18px rgba(8, 3, 21, .62);
+}
+:root[data-theme-id="halloween-2026"] .hero-illustration-picture {
+  position: relative;
+  z-index: 1;
+}
+:root[data-theme-id="halloween-2026"] .hero-illustration-slot {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  height: clamp(240px, 25vw, 330px);
+  aspect-ratio: auto;
+  align-self: center;
+  border: 0;
+  border-radius: 26px;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+:root[data-theme-id="halloween-2026"] .hero-illustration-slot::before {
+  content: '';
+  position: absolute;
+  inset: 10% 3% 8% 9%;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at 58% 36%, rgba(255, 150, 82, .07), transparent 44%), radial-gradient(ellipse at 60% 92%, rgba(110, 65, 180, .12), transparent 58%);
+  pointer-events: none;
+  z-index: 0;
+}
+:root[data-theme-id="halloween-2026"] .hero-illustration-slot .hero-illustration {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: 56% center;
+  filter: drop-shadow(0 14px 20px rgba(3, 1, 15, .34)) saturate(1.08) brightness(1.06);
+  -webkit-mask-image: radial-gradient(ellipse 88% 86% at 58% 50%, #000 48%, rgba(0, 0, 0, .94) 70%, transparent 100%);
+  mask-image: radial-gradient(ellipse 88% 86% at 58% 50%, #000 48%, rgba(0, 0, 0, .94) 70%, transparent 100%);
+}
+:root[data-theme-id="halloween-2026"] .hero-panel .eyebrow { color: #c69bf5; }
+:root[data-theme-id="halloween-2026"] .hero-panel h1 { font-size: clamp(2.2rem, 4.2vw, 4.1rem); letter-spacing: -.035em; }
+:root[data-theme-id="halloween-2026"] .hero-panel p { color: #e4d8f4; }
+:root[data-theme-id="halloween-2026"] .hero-actions {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  margin-top: 18px;
+  justify-content: flex-start;
+}
+
+:root[data-theme-id="halloween-2026"] {
+  --success-bg: rgba(22, 101, 52, .3);
+  --success-border: rgba(134, 239, 172, .52);
+  --success-text: #d1fae5;
+}
+
+:root[data-theme-id="halloween-2026"] .card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: rgba(18, 12, 40, .92);
+}
+:root[data-theme-id="halloween-2026"] .card::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  right: -8%;
+  bottom: -32%;
+  width: 46%;
+  height: 95%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(234, 91, 45, .18), transparent 67%);
+  pointer-events: none;
+}
+:root[data-theme-id="halloween-2026"] .card::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  right: 6%;
+  top: 0;
+  width: 92px;
+  height: 70px;
+  background: url('/themes/halloween-2026/web-corners.svg') no-repeat top right / 72px auto;
+  opacity: .06;
+  pointer-events: none;
+}
+:root[data-theme-id="halloween-2026"] .card > * { position: relative; z-index: 1; }
+:root[data-theme-id="halloween-2026"] .stat-card {
+  background:
+    radial-gradient(circle at 88% 110%, rgba(245, 92, 40, .12), transparent 38%),
+    rgba(18, 12, 40, .94);
+}
+:root[data-theme-id="halloween-2026"] .stat-card:nth-child(2n) {
+  background:
+    radial-gradient(circle at 88% 110%, rgba(125, 72, 220, .24), transparent 38%),
+    rgba(18, 12, 40, .94);
+}
+:root[data-theme-id="halloween-2026"] .stat-card:nth-child(3) {
+  background:
+    radial-gradient(circle at 88% 110%, rgba(125, 72, 220, .16), transparent 42%),
+    rgba(18, 12, 40, .94);
+}
+:root[data-theme-id="halloween-2026"] .stat-card::after { display: none; }
+:root[data-theme-id="halloween-2026"] .stat-card > span {
+  box-shadow: 0 0 0 1px rgba(153, 92, 214, .24), 0 8px 24px rgba(87, 38, 145, .26);
+}
+
+@media (max-width: 820px) {
+  :root[data-theme-id="halloween-2026"] .hero-panel {
+    display: grid;
+    grid-template-columns: 1fr;
+    min-height: 0;
+    padding: 22px 24px 16px;
+  }
+  :root[data-theme-id="halloween-2026"] .hero-panel > .hero-copy { max-width: none; }
+  :root[data-theme-id="halloween-2026"] .hero-illustration-slot {
+    min-height: 0;
+    height: clamp(190px, 28vw, 230px);
+    aspect-ratio: auto;
+    margin-top: 0;
+    overflow: hidden;
+  }
+  :root[data-theme-id="halloween-2026"] .hero-illustration-slot .hero-illustration {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  :root[data-theme-id="halloween-2026"] .hero-panel h1 { font-size: clamp(2rem, 11vw, 3.2rem); }
+  :root[data-theme-id="halloween-2026"] .hero-actions {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    justify-content: stretch;
+    margin-top: 18px;
+  }
+}
+
+@media (max-width: 520px) {
+  :root[data-theme-id="halloween-2026"] .hero-illustration-slot {
+    height: 196px;
+    min-height: 0;
+    aspect-ratio: auto;
+    border-radius: 18px;
+    margin-top: 0;
+  }
+  :root[data-theme-id="halloween-2026"] .hero-illustration-slot .hero-illustration {
+    object-position: 55% center;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme-id="halloween-2026"] .hero-illustration { animation: none; }
+}
+
+/* Acceso: el formulario conserva la estructura y las integraciones reales,
+   pero comparte la ambientación nocturna del portal sin convertirla en una
+   pantalla de terror. Los adornos quedan detrás del contenido y no reciben
+   interacción. */
+:root[data-theme-id="halloween-2026"] .auth-card.login-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  width: min(96vw, 480px);
+  margin: clamp(18px, 4vh, 42px) auto clamp(24px, 5vh, 48px);
+  padding: clamp(26px, 4vw, 36px) clamp(22px, 4vw, 34px) clamp(22px, 3vw, 30px);
+  border: 1px solid rgba(155, 104, 183, .66);
+  border-radius: 30px;
+  background:
+    linear-gradient(148deg, rgba(28, 16, 53, .93), rgba(21, 12, 42, .9) 58%, rgba(53, 24, 65, .88)),
+    var(--surface-glass);
+  box-shadow: 0 22px 58px rgba(5, 2, 17, .56), 0 0 0 1px rgba(236, 103, 180, .14), 0 0 36px rgba(168, 74, 190, .16), inset 0 1px 0 rgba(255, 210, 126, .07);
+  backdrop-filter: blur(8px);
+}
+
+/* El acceso usa la ilustración independiente del tema como una escena de
+   fondo. El formulario sigue siendo HTML real y queda por encima de la
+   ilustración; la imagen solo aporta atmósfera y no participa en el layout. */
+:root[data-theme-id="halloween-2026"] body:has(.login-card) {
+  overflow-x: hidden;
+  background:
+    radial-gradient(ellipse at 78% 38%, rgba(255, 148, 79, .18), transparent 27rem),
+    radial-gradient(ellipse at 18% 76%, rgba(104, 55, 171, .34), transparent 30rem),
+    linear-gradient(135deg, #080512 0%, #170b2d 52%, #0c061d 100%);
+}
+:root[data-theme-id="halloween-2026"] body:has(.login-card)::before,
+:root[data-theme-id="halloween-2026"] body:has(.login-card)::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+:root[data-theme-id="halloween-2026"] body:has(.login-card)::before {
+  z-index: 0;
+  background: url('/themes/halloween-2026/hero-illustration-desktop.webp') no-repeat right center / auto min(100vh, 1080px);
+  opacity: .92;
+  filter: saturate(1.02) contrast(1.08);
+}
+:root[data-theme-id="halloween-2026"] body:has(.login-card)::after {
+  z-index: 0;
+  background:
+    linear-gradient(90deg, rgba(8, 5, 18, .84) 0%, rgba(13, 7, 28, .58) 38%, rgba(13, 7, 28, .16) 72%, rgba(8, 4, 18, .14) 100%),
+    radial-gradient(ellipse at 50% 44%, rgba(15, 8, 34, .2), transparent 62%);
+}
+:root[data-theme-id="halloween-2026"] body:has(.login-card) .app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card::before,
+:root[data-theme-id="halloween-2026"] .auth-card.login-card::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card::before {
+  inset: 0 auto auto 0;
+  width: 118px;
+  height: 108px;
+  background: url('/themes/halloween-2026/login-web-corners.svg') no-repeat top left / 118px auto;
+  opacity: .62;
+  transform-origin: 0 0;
+  animation: halloween-login-web-sway 13s ease-in-out infinite;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card::after {
+  inset: 0 0 auto auto;
+  width: 118px;
+  height: 108px;
+  background: url('/themes/halloween-2026/login-web-corners-right.svg') no-repeat top right / 118px auto;
+  opacity: .52;
+  transform-origin: top right;
+  animation: halloween-login-web-sway-right 15s ease-in-out -6s infinite;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card h1 {
+  margin-bottom: 8px;
+  color: #fff5ff;
+  text-shadow: 0 2px 18px rgba(8, 3, 21, .58);
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .mini-logo {
+  width: 96px;
+  margin-bottom: 10px;
+  filter: drop-shadow(0 8px 16px rgba(111, 53, 172, .34));
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .auth-subtitle {
+  color: #d7c6e7;
+  line-height: 1.45;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .input {
+  border-color: rgba(134, 98, 159, .8);
+  background: rgba(31, 19, 57, .9);
+  color: #fbf4ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .input::placeholder {
+  color: #b6a3c9;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .input:focus {
+  border-color: #e8955c;
+  box-shadow: 0 0 0 4px rgba(232, 149, 92, .16), 0 8px 20px rgba(5, 2, 17, .18);
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .checkbox-row {
+  color: #c8b9d8;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .checkbox-row input {
+  accent-color: #db8b54;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .social-button {
+  border-color: rgba(134, 98, 159, .74);
+  background: rgba(30, 18, 55, .88);
+  color: #f5eaff;
+  box-shadow: 0 8px 22px rgba(4, 2, 13, .2);
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .social-button:hover,
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .social-button:focus-visible {
+  border-color: rgba(232, 149, 92, .8);
+  background: rgba(50, 26, 69, .96);
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .btn.secondary {
+  border-color: rgba(134, 98, 159, .78);
+  background: rgba(52, 32, 79, .86);
+  color: #f2ddff;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .btn.ghost {
+  border-color: rgba(134, 98, 159, .72);
+  background: rgba(20, 12, 39, .52);
+  color: #e6cfff;
+}
+
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .btn.link,
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .site-footer,
+:root[data-theme-id="halloween-2026"] .auth-card.login-card .site-footer a {
+  color: #d8b8f5;
+}
+
+/* En el login los murciélagos son un fondo ambiental muy tenue. Al estar en
+   la capa fija de adornos, quedan detrás de la tarjeta y no desplazan el layout. */
+:root[data-theme-id="halloween-2026"] body:has(.login-card) .theme-halloween-ornaments > .halloween-bat {
+  display: block;
+  z-index: 0;
+  width: clamp(54px, 7vw, 104px);
+  opacity: .18;
+}
+
+:root[data-theme-id="halloween-2026"] body:has(.login-card) .halloween-bat-one {
+  top: 16%;
+  left: max(4vw, 18px);
+}
+
+:root[data-theme-id="halloween-2026"] body:has(.login-card) .halloween-bat-two {
+  top: 27%;
+  right: max(5vw, 20px);
+  opacity: .14;
+}
+
+@keyframes halloween-login-web-sway {
+  0%, 100% { transform: rotate(0deg); opacity: .62; }
+  50% { transform: rotate(1.2deg); opacity: .72; }
+}
+@keyframes halloween-login-web-sway-right {
+  0%, 100% { transform: rotate(0deg); opacity: .52; }
+  50% { transform: rotate(-1.2deg); opacity: .62; }
+}
+
+@media (max-width: 820px) {
+  :root[data-theme-id="halloween-2026"] body:has(.login-card)::before {
+    background-image: url('/themes/halloween-2026/hero-illustration-mobile.webp');
+    background-position: center bottom;
+    background-size: auto min(88vh, 1086px);
+    opacity: .86;
+  }
+  :root[data-theme-id="halloween-2026"] body:has(.login-card)::after {
+    background:
+      linear-gradient(180deg, rgba(8, 5, 18, .36) 0%, rgba(10, 5, 23, .46) 44%, rgba(8, 4, 18, .2) 100%),
+      radial-gradient(ellipse at 50% 34%, rgba(15, 8, 34, .16), transparent 68%);
+  }
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card {
+    margin-top: 14px;
+    margin-bottom: 24px;
+    padding: 24px 22px 22px;
+    border-radius: 26px;
+  }
+  :root[data-theme-id="halloween-2026"] body:has(.login-card) .halloween-bat-two {
+    top: 32%;
+    right: 3vw;
+  }
+}
+
+@media (max-width: 520px) {
+  :root[data-theme-id="halloween-2026"] body:has(.login-card)::before {
+    background-position: center bottom;
+    background-size: auto max(100vh, 860px);
+    opacity: .9;
+  }
+  :root[data-theme-id="halloween-2026"] body:has(.login-card) .theme-floating {
+    /* En móvil el control de apariencia vive en el panel de prueba; ocultarlo
+       aquí evita que tape el borde del formulario o los enlaces al desplazarse. */
+    display: none;
+  }
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card {
+    width: min(calc(100vw - 40px), 440px);
+    margin: 10px auto 22px;
+    padding: 22px 16px 18px;
+    border-radius: 24px;
+    border-color: rgba(197, 124, 220, .34);
+    background: linear-gradient(180deg, rgba(20, 10, 42, .34), rgba(15, 7, 31, .2));
+    box-shadow: 0 18px 48px rgba(5, 2, 17, .28), 0 0 0 1px rgba(236, 103, 180, .12), 0 0 26px rgba(168, 74, 190, .14), inset 0 1px 0 rgba(255, 210, 126, .08);
+    backdrop-filter: blur(1px);
+  }
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card .mini-logo {
+    width: 86px;
+  }
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card .stack {
+    gap: 11px;
+    margin-top: 14px;
+  }
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card .auth-links {
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+  }
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card::before {
+    width: 86px;
+    height: 80px;
+    background-size: 86px auto;
+    opacity: .66;
+  }
+  :root[data-theme-id="halloween-2026"] body:has(.login-card) .halloween-web-thread {
+    opacity: .16;
+  }
+  :root[data-theme-id="halloween-2026"] body:has(.login-card) .halloween-bat-one {
+    top: 12%;
+    left: 2vw;
+    opacity: .2;
+  }
+  :root[data-theme-id="halloween-2026"] body:has(.login-card) .halloween-bat-two {
+    top: 35%;
+    right: 2vw;
+    opacity: .16;
+  }
+}
+
+@media (max-height: 620px) and (min-width: 521px) {
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card {
+    margin-top: 10px;
+    margin-bottom: 18px;
+    padding-top: 20px;
+    padding-bottom: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card::before,
+  :root[data-theme-id="halloween-2026"] .auth-card.login-card::after,
+  :root[data-theme-id="halloween-2026"] body:has(.login-card) .halloween-bat {
+    animation: none;
+  }
+}

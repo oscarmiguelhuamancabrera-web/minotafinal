@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" role="img" aria-label="Castillo y luna de Halloween">
+  <defs>
+    <radialGradient id="moon" cx="42%" cy="34%" r="70%">
+      <stop offset="0" stop-color="#fff3bd"/>
+      <stop offset=".68" stop-color="#ffc56f"/>
+      <stop offset="1" stop-color="#ef834d"/>
+    </radialGradient>
+    <radialGradient id="moonGlow" cx="50%" cy="45%" r="50%">
+      <stop offset="0" stop-color="#ffbb72" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#ffbb72" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#2a164a" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#110a2a" stop-opacity=".82"/>
+    </linearGradient>
+    <linearGradient id="castle" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#17102c"/>
+      <stop offset="1" stop-color="#09071a"/>
+    </linearGradient>
+    <filter id="blur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="18"/></filter>
+  </defs>
+  <ellipse cx="690" cy="155" rx="225" ry="180" fill="url(#moonGlow)" filter="url(#blur)"/>
+  <circle cx="705" cy="130" r="108" fill="url(#moon)"/>
+  <g fill="#d77851" opacity=".25">
+    <circle cx="666" cy="92" r="19"/><circle cx="737" cy="79" r="14"/><circle cx="746" cy="157" r="25"/>
+    <circle cx="683" cy="165" r="12"/><ellipse cx="633" cy="133" rx="18" ry="9"/>
+  </g>
+  <path d="M0 265 C130 215 210 237 300 261 C390 285 464 238 557 248 C648 258 735 202 830 223 C895 237 932 225 960 209 V500 H0Z" fill="url(#sky)"/>
+  <g fill="url(#castle)">
+    <path d="M502 352V214l35-25 35 25v-64l29-43 29 43v64l40-32 40 32v-92l26-38 27 38v92l41-30 41 30v-72l25-36 25 36v160Z"/>
+    <path d="M565 320V238l21-21 22 21v-62l17-29 18 29v62l30-25 30 25v-57l16-25 18 25v57l30-23 31 23v-44l15-22 16 22v106Z" opacity=".82"/>
+  </g>
+  <g fill="#ffc14e">
+    <rect x="569" y="228" width="8" height="15" rx="2"/><rect x="621" y="180" width="7" height="13" rx="2"/>
+    <rect x="687" y="248" width="8" height="14" rx="2"/><rect x="738" y="192" width="7" height="14" rx="2"/>
+    <rect x="781" y="232" width="8" height="15" rx="2"/><rect x="838" y="216" width="7" height="14" rx="2"/>
+    <rect x="655" y="294" width="8" height="15" rx="2"/><rect x="728" y="286" width="8" height="15" rx="2"/>
+  </g>
+  <g fill="#0c0a1d">
+    <path d="M75 418V217l-24 32-25-15 47-62 46 62-25 15-23-32v201Z" opacity=".86"/>
+    <path d="M898 440V236l-24 28-25-14 48-68 46 68-25 14-22-28v204Z" opacity=".9"/>
+    <path d="M160 464v-136l-46 21 42-57-42-12 68-22 32-57 3 65 61-21-48 43 44 23-68-7-29 125Z" opacity=".72"/>
+    <path d="M869 469V328l-38-10 44-20 23-60 7 66 45-19-35 40 45 23-57-7-20 128Z" opacity=".8"/>
+  </g>
+  <g fill="none" stroke="#0a0818" stroke-width="7" stroke-linecap="round">
+    <path d="M480 465v-90m-36-31 36 24 37-27m-70 66 34 26 37-30"/>
+    <path d="M790 471v-88m-37-31 38 25 38-27m-72 66 35 25 39-31"/>
+  </g>
+  <g fill="#17102e" opacity=".9">
+    <path d="M398 127c23-29 54-24 68 2-25-9-37 6-49 18-7-7-14-13-19-20Z"/>
+    <path d="M398 127c-23-29-54-24-68 2 25-9 37 6 49 18 7-7 14-13 19-20Z"/>
+    <path d="M845 163c17-22 40-20 53 0-19-7-28 4-38 14-5-5-10-9-15-14Z"/>
+    <path d="M845 163c-17-22-40-20-53 0 19-7 28 4 38 14 5-5 10-9 15-14Z"/>
+  </g>
+  <path d="M0 449c164-54 263-45 389 2 98 37 203 41 310 8 100-30 168-32 261-4v45H0Z" fill="#0b081b" opacity=".93"/>
+  <g fill="#ffad47">
+    <circle cx="540" cy="403" r="5"/><circle cx="545" cy="393" r="3"/><circle cx="874" cy="396" r="4"/>
+  </g>
+</svg>

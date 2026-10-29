@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import vm from 'node:vm'
 import postcss from 'postcss'
 import { getPeruDayBounds, isWithinPeruPeriod, todayISO, formatPeruHour } from '../src/utils/timezone.js'
+import { isThemeActive } from '../src/themes/core/themeResolver.js'
 
 const bootSource = fs.readFileSync(new URL('../public/theme-init.js', import.meta.url), 'utf8')
 
@@ -170,4 +171,12 @@ test('el build de producción no expone acceso demo o invitado', () => {
   assert.doesNotMatch(app, /Continuar como invitado/)
   assert.doesNotMatch(app, /onGuest/)
   assert.doesNotMatch(app, /enterGuestMode/)
+})
+
+test('Halloween 2026 se activa en Lima durante su ventana y vuelve a Original al vencer', () => {
+  const config = JSON.parse(fs.readFileSync(new URL('../src/themes/halloween-2026/theme.json', import.meta.url), 'utf8'))
+  assert.equal(config.timeZone, 'America/Lima')
+  assert.equal(isThemeActive(config, new Date('2026-10-29T12:00:00-05:00')), true)
+  assert.equal(isThemeActive(config, new Date('2026-11-01T00:00:00-05:00')), false)
+  assert.match(fs.readFileSync(new URL('../public/theme-init.js', import.meta.url), 'utf8'), /dataset\.themeId/)
 })
