@@ -734,6 +734,7 @@ function App() {
   const screenRef = useRef(screen)
   const initializationRef = useRef(false)
   const profileLoadPromiseRef = useRef(null)
+  const loadedUserIdRef = useRef(null)
   const authGenerationRef = useRef(0)
   const courseGradesRequestRef = useRef(0)
   const gradesHydratedRef = useRef(false)
@@ -833,6 +834,10 @@ function App() {
       // No es necesario recargar perfil, cursos e historial en cada renovación.
       if (event === 'TOKEN_REFRESHED') return
 
+      // Al volver a la pestaña/app, Supabase vuelve a emitir SIGNED_IN con la misma
+      // sesión. Recargar todo reiniciaba las notas que el alumno estaba escribiendo.
+      if (event === 'SIGNED_IN' && newSession?.user?.id && newSession.user.id === loadedUserIdRef.current) return
+
       setGuestMode(false)
       if (newSession?.user) {
         try {
@@ -843,6 +848,7 @@ function App() {
         }
       } else {
         authGenerationRef.current += 1
+        loadedUserIdRef.current = null
         setProfile(null)
         setCourses([])
         setAvailableCourses([])
@@ -1053,7 +1059,9 @@ function App() {
     const promise = loadProfileAndDataInternal(user, generation)
     profileLoadPromiseRef.current = { userId: user.id, promise }
     try {
-      return await promise
+      const loaded = await promise
+      if (generation === authGenerationRef.current) loadedUserIdRef.current = user.id
+      return loaded
     } finally {
       if (profileLoadPromiseRef.current?.promise === promise) profileLoadPromiseRef.current = null
     }
