@@ -1356,7 +1356,6 @@ function App() {
       .select(`id,enrollment_type,status,credits,credits_confirmed_at,updated_at,course_id,course:courses!inner(${COURSE_SELECT})`)
       .eq('user_id', userProfile.id)
       .eq('status', 'visible')
-      .eq('cycle_id', userProfile.current_cycle_id)
       .eq('course.status', 'active')
 
     if (studentRes.error && /credits|credits_confirmed_at/i.test(String(studentRes.error.message || ''))) {
@@ -1365,7 +1364,6 @@ function App() {
         .select(`id,enrollment_type,status,updated_at,course_id,course:courses!inner(${COURSE_SELECT})`)
         .eq('user_id', userProfile.id)
         .eq('status', 'visible')
-        .eq('cycle_id', userProfile.current_cycle_id)
         .eq('course.status', 'active')
     }
 
@@ -1402,9 +1400,20 @@ function App() {
       .eq('course.status', 'active')
       .order('created_at', { ascending: false })
       .limit(50)
-    if (contextProfile?.current_cycle_id) query = query.eq('course.cycle_id', contextProfile.current_cycle_id)
     const { data, error } = await query
-    if (!error) setHistory(data || [])
+    if (error) return
+    if (!contextProfile?.current_cycle_id) {
+      setHistory(data || [])
+      return
+    }
+    // Historial del ciclo actual + cursos de otros ciclos que el alumno tiene agregados.
+    const { data: visibleRows } = await supabase
+      .from('student_courses')
+      .select('course_id')
+      .eq('user_id', userId)
+      .eq('status', 'visible')
+    const visibleIds = new Set((visibleRows || []).map((row) => row.course_id))
+    setHistory((data || []).filter((item) => item.course?.cycle_id === contextProfile.current_cycle_id || visibleIds.has(item.course_id)))
   }
 
   async function loadWeightedPreference(userProfile = profile) {
@@ -1447,12 +1456,14 @@ function App() {
       notify('error', 'Selecciona un ciclo académico antes de configurar el ponderado.')
       return
     }
-    const selectedCourses = (courses || []).filter((course) => course.cycle_id === cycleId)
+    // Incluye todos los cursos visibles (también los de otros ciclos, p. ej. cursos repetidos o adelantados).
+    const selectedCourses = courses || []
     setWeightedModal({
       step: 'edit',
       cycleId,
       rows: selectedCourses.map((course) => ({
         courseId: course.id,
+        courseCycleId: course.cycle_id || null,
         studentCourseId: course.student_course_id || null,
         name: course.name,
         credits: storedCourseCredits(course) === null ? '' : String(storedCourseCredits(course)),
@@ -1502,7 +1513,7 @@ function App() {
       university_id: row.universityId,
       faculty_id: row.facultyId,
       career_id: row.careerId,
-      cycle_id: weightedModal.cycleId,
+      cycle_id: row.courseCycleId || weightedModal.cycleId,
       enrollment_type: row.enrollmentType,
       status: 'visible',
       credits: toNumber(row.credits),
@@ -1572,7 +1583,7 @@ function App() {
 
   useEffect(() => {
     if (!profile?.id || isAdmin || !profile.current_cycle_id || weightedPreferenceStatus !== 'ready' || !weightedPreference?.enabled) return
-    const missing = (courses || []).filter((course) => course.cycle_id === profile.current_cycle_id && !courseCreditIsConfirmed(course, weightedPreference))
+    const missing = (courses || []).filter((course) => !courseCreditIsConfirmed(course, weightedPreference))
     const key = `${profile.current_cycle_id}:${missing.map((course) => course.id).sort().join(',')}`
     if (missing.length && key !== weightedPromptedKeyRef.current && !weightedModal) {
       weightedPromptedKeyRef.current = key
