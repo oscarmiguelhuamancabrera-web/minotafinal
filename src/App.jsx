@@ -963,6 +963,37 @@ function App() {
     return templates
   }
 
+  // Aplica la nota mínima y los porcentajes que el alumno personalizó para su
+  // cuenta sobre la plantilla oficial. Se usa al elegir plantilla y al abrir un
+  // curso, para que los ajustes guardados no vuelvan a los valores por defecto.
+  async function withUserTemplateOverrides(template, componentRows = []) {
+    if (!template?.id || !session?.user?.id || guestMode || isAdmin) return { template, components: componentRows }
+
+    const [{ data: userTemplate }, { data: overrides }] = await Promise.all([
+      supabase
+        .from('user_evaluation_settings')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('template_id', template.id)
+        .maybeSingle(),
+      supabase
+        .from('user_evaluation_component_settings')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('template_id', template.id)
+    ])
+
+    const effectiveTemplate = userTemplate
+      ? { ...template, min_passing_grade: userTemplate.min_passing_grade ?? template.min_passing_grade }
+      : template
+    const overrideMap = new Map((overrides || []).map((row) => [row.component_id, row]))
+    const components = componentRows.map((component) => ({
+      ...component,
+      weight_percent: overrideMap.get(component.id)?.weight_percent ?? component.weight_percent
+    }))
+    return { template: effectiveTemplate, components }
+  }
+
   async function applyEvaluationTemplate(templateId) {
     if (!templateId) {
       const fallback = normalizeEvaluationComponents([], settings)
@@ -995,32 +1026,10 @@ function App() {
     let effectiveTemplate = template
     let componentRows = components || []
 
-    if (!compError && session?.user?.id && !guestMode && !isAdmin) {
-      const { data: userTemplate } = await supabase
-        .from('user_evaluation_settings')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .eq('template_id', template.id)
-        .maybeSingle()
-
-      if (userTemplate) {
-        effectiveTemplate = {
-          ...template,
-          min_passing_grade: userTemplate.min_passing_grade ?? template.min_passing_grade
-        }
-      }
-
-      const { data: overrides } = await supabase
-        .from('user_evaluation_component_settings')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .eq('template_id', template.id)
-
-      const overrideMap = new Map((overrides || []).map((row) => [row.component_id, row]))
-      componentRows = componentRows.map((component) => ({
-        ...component,
-        weight_percent: overrideMap.get(component.id)?.weight_percent ?? component.weight_percent
-      }))
+    if (!compError) {
+      const overridden = await withUserTemplateOverrides(template, componentRows)
+      effectiveTemplate = overridden.template
+      componentRows = overridden.components
     }
 
     const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(componentRows, settings)
@@ -1604,10 +1613,19 @@ function App() {
 
   async function persistGradesForCourse(courseId, gradeValues, items, template, course = null) {
     if (!session?.user?.id || !courseId) return new Error('No hay una sesión activa para guardar las calificaciones.')
-    const normalized = normalizeGradesForDb(gradeValues)
+    // Una nota fuera de 0–20 ya se muestra como error en el formulario; no se
+    // envía a la base de datos (violaría el CHECK) y se conserva el último valor válido.
+    const isStorableScore = (value) => {
+      if (value === null || value === undefined || value === '') return true
+      const number = toNumber(value)
+      return number !== null && number >= 0 && number <= 20
+    }
+    const normalized = Object.fromEntries(
+      Object.entries(normalizeGradesForDb(gradeValues)).filter(([key]) => isStorableScore(gradeValues[key]))
+    )
     if (template?.id && items.some((item) => item.id)) {
       const scoreRows = items
-        .filter((item) => item.id)
+        .filter((item) => item.id && isStorableScore(gradeValues[item.key]))
         .map((item) => ({
           user_id: session.user.id,
           course_id: courseId,
@@ -1764,7 +1782,13 @@ function App() {
         .eq('status', 'active')
         .order('component_order')
 
-      const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(components || [], settings)
+      let componentRows = components || []
+      if (!compError) {
+        const overridden = await withUserTemplateOverrides(template, componentRows)
+        template = overridden.template
+        componentRows = overridden.components
+      }
+      const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(componentRows, settings)
       if (requestId !== courseGradesRequestRef.current) return
       setEvaluationTemplate(template)
       setEvaluationItems(items)
