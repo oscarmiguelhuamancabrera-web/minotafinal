@@ -1719,3 +1719,7 @@ body,
   .legal-modal-footer { padding-left: 16px; padding-right: 16px; }
   .legal-modal-footer .btn { width: 100%; }
 }
+
+/* Nota fuera del rango 0–20 en la calculadora */
+.input.grade.invalid { border-color: #f87171; box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.25); }
+.grade-range-error { display: block; margin-top: 6px; color: #fca5a5; font-weight: 700; font-size: 0.8rem; text-align: center; }

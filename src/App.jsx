@@ -632,9 +632,24 @@ function isProfileIncomplete(userProfile) {
   return !userProfile?.first_name || !userProfile?.last_name || !userProfile?.university_id || !userProfile?.faculty_id || !userProfile?.career_id || !userProfile?.current_cycle_id
 }
 
+// Una nota vacía es válida (pendiente); si tiene valor, debe estar entre 0 y 20.
+function isScoreInRange(value) {
+  if (value === null || value === undefined || value === '') return true
+  const number = toNumber(value)
+  return number !== null && number >= 0 && number <= 20
+}
+
+function isScoreCheckError(error) {
+  const message = String(error?.message || '').toLowerCase()
+  return error?.code === '23514' || message.includes('score_check') || message.includes('violates check constraint')
+}
+
 function getErrorMessage(error) {
   const message = error?.message || ''
   const lower = message.toLowerCase()
+  if (isScoreCheckError(error)) {
+    return 'Las notas deben estar entre 0 y 20.'
+  }
   if (lower.includes('email not confirmed') || lower.includes('not confirmed') || lower.includes('confirm')) {
     return 'No se pudo iniciar sesión porque la cuenta todavía no está habilitada.'
   }
@@ -1615,11 +1630,7 @@ function App() {
     if (!session?.user?.id || !courseId) return new Error('No hay una sesión activa para guardar las calificaciones.')
     // Una nota fuera de 0–20 ya se muestra como error en el formulario; no se
     // envía a la base de datos (violaría el CHECK) y se conserva el último valor válido.
-    const isStorableScore = (value) => {
-      if (value === null || value === undefined || value === '') return true
-      const number = toNumber(value)
-      return number !== null && number >= 0 && number <= 20
-    }
+    const isStorableScore = isScoreInRange
     const normalized = Object.fromEntries(
       Object.entries(normalizeGradesForDb(gradeValues)).filter(([key]) => isStorableScore(gradeValues[key]))
     )
@@ -1661,6 +1672,12 @@ function App() {
     const error = await persistGradesForCourse(pending.courseId, pending.grades, pending.items, pending.template, pending.course)
     savingGradesRef.current = false
 
+    if (error && isScoreCheckError(error)) {
+      // La validación 0–20 ya se muestra junto al campo; no es un error de conexión.
+      setGradeSaveStatus('idle')
+      setGradeSaveError('')
+      return null
+    }
     if (error) {
       setGradeSaveStatus('error')
       setGradeSaveError(getErrorMessage(error))
@@ -3518,6 +3535,7 @@ function CoursesScreen({ courses, availableCourses, cycles, profile, onCreate, o
 function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelectCourse, onCreateCourse, grades, setGrades, settings, result, onCalculate, onGenerate, onClean, onSave, onGradeChange, gradeLoadStatus = 'idle', gradeSaveStatus = 'idle', gradeSaveError = '', onRetrySave, activeCourse, guestMode, evaluationTemplate, evaluationItems, evaluationTemplates = [], onSelectTemplate, allowTemplateSelection = false, onExtractedGrades }) {
   const items = evaluationItems?.length ? evaluationItems : normalizeEvaluationComponents([], settings)
   const groups = [...new Set(items.map((item) => item.group || 'Evaluaciones'))]
+  const hasInvalidScore = items.some((item) => !isScoreInRange(grades?.[item.key]))
   const updateGrade = (key, value) => {
     if (onGradeChange) onGradeChange(key, value)
     else setGrades((prev) => ({ ...prev, [key]: value }))
@@ -3702,7 +3720,7 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
           {gradeSaveStatus === 'pending' && <span>Pendiente de sincronización…</span>}
           {gradeSaveStatus === 'saving' && <span>Guardando…</span>}
           {gradeSaveStatus === 'saved' && <span>Guardado correctamente.</span>}
-          {gradeSaveStatus === 'error' && <><span>{gradeSaveError || 'Error al guardar.'} Revisa tu conexión e inténtalo nuevamente.</span><button className="btn secondary small" type="button" onClick={onRetrySave}>Reintentar</button></>}
+          {gradeSaveStatus === 'error' && !hasInvalidScore && <><span>{gradeSaveError || 'Error al guardar.'} Revisa tu conexión e inténtalo nuevamente.</span><button className="btn secondary small" type="button" onClick={onRetrySave}>Reintentar</button></>}
         </div>
       )}
       <div data-tour="calculator-grades">
@@ -3713,9 +3731,9 @@ function CalculatorScreen({ title, subtitle, courses, selectedCourseId, onSelect
       <div className="action-row" data-tour="calculator-actions">
         <button className="btn primary" onClick={onCalculate}>🧮 Calcular</button>
         <button className="btn warning" onClick={onClean}>🧹 Limpiar</button>
-        <button className="btn success" onClick={onGenerate}>✨ Generar</button>
+        <button className="btn success" onClick={onGenerate} disabled={hasInvalidScore}>✨ Generar</button>
       </div>
-      {onSave && <button className="btn secondary full" data-tour="calculator-save" onClick={onSave}>💾 Guardar resultado</button>}
+      {onSave && <button className="btn secondary full" data-tour="calculator-save" onClick={onSave} disabled={hasInvalidScore}>💾 Guardar resultado</button>}
       {result && <ResultCard result={result} />}
     </div>
   )
@@ -3767,7 +3785,8 @@ function EvaluationSection({ title, items, grades, settings, updateGrade, flexib
         {items.map((item) => (
           <div className="eval-card" key={item.key}>
             <div className="eval-head"><strong>{item.label}</strong><span>{formatPercent(flexible ? item.percent : settings[item.percentKey])}%</span></div>
-            <input className="input grade" inputMode="decimal" placeholder="—" value={grades[item.key]} onChange={(e) => updateGrade(item.key, e.target.value)} />
+            <input className={`input grade${isScoreInRange(grades[item.key]) ? '' : ' invalid'}`} inputMode="decimal" placeholder="—" aria-invalid={!isScoreInRange(grades[item.key])} value={grades[item.key]} onChange={(e) => updateGrade(item.key, e.target.value)} />
+            {!isScoreInRange(grades[item.key]) && <small className="grade-range-error" role="alert">Debe estar entre 0 y 20.</small>}
           </div>
         ))}
       </div>
