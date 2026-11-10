@@ -981,20 +981,22 @@ function App() {
   // Aplica la nota mínima y los porcentajes que el alumno personalizó para su
   // cuenta sobre la plantilla oficial. Se usa al elegir plantilla y al abrir un
   // curso, para que los ajustes guardados no vuelvan a los valores por defecto.
-  async function withUserTemplateOverrides(template, componentRows = []) {
-    if (!template?.id || !session?.user?.id || guestMode || isAdmin) return { template, components: componentRows }
+  // userId se recibe explícito porque al iniciar sesión esta función corre con un
+  // estado anterior en el que `session` todavía es null.
+  async function withUserTemplateOverrides(template, componentRows = [], userId = session?.user?.id, skip = guestMode || isAdmin) {
+    if (!template?.id || !userId || skip) return { template, components: componentRows }
 
     const [{ data: userTemplate }, { data: overrides }] = await Promise.all([
       supabase
         .from('user_evaluation_settings')
         .select('*')
-        .eq('user_id', session.user.id)
+        .eq('user_id', userId)
         .eq('template_id', template.id)
         .maybeSingle(),
       supabase
         .from('user_evaluation_component_settings')
         .select('*')
-        .eq('user_id', session.user.id)
+        .eq('user_id', userId)
         .eq('template_id', template.id)
     ])
 
@@ -1009,9 +1011,10 @@ function App() {
     return { template: effectiveTemplate, components }
   }
 
-  async function applyEvaluationTemplate(templateId) {
+  async function applyEvaluationTemplate(templateId, options = {}) {
+    const fallbackSettings = options.settings || settings
     if (!templateId) {
-      const fallback = normalizeEvaluationComponents([], settings)
+      const fallback = normalizeEvaluationComponents([], fallbackSettings)
       setEvaluationTemplate(null)
       setEvaluationItems(fallback)
       setGrades(emptyDynamicGrades(fallback))
@@ -1042,12 +1045,14 @@ function App() {
     let componentRows = components || []
 
     if (!compError) {
-      const overridden = await withUserTemplateOverrides(template, componentRows)
+      const overridden = options.userId
+        ? await withUserTemplateOverrides(template, componentRows, options.userId, false)
+        : await withUserTemplateOverrides(template, componentRows)
       effectiveTemplate = overridden.template
       componentRows = overridden.components
     }
 
-    const items = compError ? normalizeEvaluationComponents([], settings) : normalizeEvaluationComponents(componentRows, settings)
+    const items = compError ? normalizeEvaluationComponents([], fallbackSettings) : normalizeEvaluationComponents(componentRows, fallbackSettings)
     setEvaluationTemplate(effectiveTemplate)
     setEvaluationItems(items)
     setGrades(emptyDynamicGrades(items))
@@ -1212,13 +1217,21 @@ function App() {
       await loadAdminData()
     } else {
       setInitializationPhase('Recuperando tus cursos...')
-      await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id, normalizedNameProfile), loadWeightedPreference(normalizedNameProfile)])
+      const [loadedSettings] = await Promise.all([loadSettings(user.id), loadCourses(normalizedNameProfile), loadHistory(user.id, normalizedNameProfile), loadWeightedPreference(normalizedNameProfile)])
+      const startupSettings = loadedSettings || DEFAULT_SETTINGS
       await loadUserCommunication(normalizedNameProfile)
 
       setInitializationPhase('Preparando tus calificaciones...')
       const templates = evaluationTemplates.length ? evaluationTemplates : await loadEvaluationTemplates()
       const defaultTemplate = findBestTemplateForContext(normalizedNameProfile, null, templates)
-      if (defaultTemplate?.id) await applyEvaluationTemplate(defaultTemplate.id)
+      if (defaultTemplate?.id) await applyEvaluationTemplate(defaultTemplate.id, { userId: user.id, settings: startupSettings })
+      else {
+        // Sin plantilla: la nota mínima y los porcentajes vienen de user_settings.
+        const fallback = normalizeEvaluationComponents([], startupSettings)
+        setEvaluationTemplate(null)
+        setEvaluationItems(fallback)
+        setGrades(emptyDynamicGrades(fallback))
+      }
     }
 
     const key = `${user.id}-${todayISO()}`
@@ -1342,8 +1355,12 @@ function App() {
 
   async function loadSettings(userId = session?.user?.id) {
     if (!userId) return
-    const { data, error } = await supabase.from('user_settings').select('*').eq('user_id', userId).single()
-    if (!error && data) setSettings(data)
+    const { data, error } = await supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle()
+    if (!error && data) {
+      setSettings(data)
+      return data
+    }
+    return null
   }
 
   async function loadCourses(userProfile = profile) {
@@ -2200,6 +2217,23 @@ function App() {
           return
         }
       }
+    } else if (!guestMode && session?.user?.id && !isAdmin) {
+      // Sin plantilla asignada: se guarda en user_settings para que sobreviva a la recarga.
+      const nextSettings = { ...settings, minimum_grade: nextTemplate.min_passing_grade }
+      components.forEach((component) => {
+        const evaluation = EVALUATIONS.find((item) => item.key === (component.key || component.id))
+        if (evaluation) nextSettings[evaluation.percentKey] = Number(component.weight_percent || 0)
+      })
+      const settingsRow = { user_id: session.user.id, minimum_grade: nextSettings.minimum_grade, updated_at: new Date().toISOString() }
+      EVALUATIONS.forEach((item) => { settingsRow[item.percentKey] = Number(nextSettings[item.percentKey] || 0) })
+      const { error: settingsError } = await supabase
+        .from('user_settings')
+        .upsert(settingsRow, { onConflict: 'user_id' })
+      if (settingsError) {
+        notify('error', getErrorMessage(settingsError))
+        return
+      }
+      setSettings(nextSettings)
     }
 
     setEvaluationTemplate(nextTemplate)
