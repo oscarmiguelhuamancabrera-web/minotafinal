@@ -1723,3 +1723,16 @@ body,
 /* Nota fuera del rango 0–20 en la calculadora */
 .input.grade.invalid { border-color: #f87171; box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.25); }
 .grade-range-error { display: block; margin-top: 6px; color: #fca5a5; font-weight: 700; font-size: 0.8rem; text-align: center; }
+
+/* Botón X para limpiar una nota individual */
+.grade-input-wrap { position: relative; }
+.grade-input-wrap .input.grade { padding-left: 44px; padding-right: 44px; }
+.grade-clear {
+  position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+  width: 28px; height: 28px; border-radius: 50%; border: none; cursor: pointer;
+  display: grid; place-items: center; padding: 0;
+  font-size: 1.2rem; font-weight: 700; line-height: 1;
+  background: rgba(148, 163, 184, 0.22); color: inherit; opacity: 0.75;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.grade-clear:hover, .grade-clear:focus-visible { opacity: 1; background: rgba(248, 113, 113, 0.35); outline: none; }

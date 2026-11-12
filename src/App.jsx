@@ -3819,7 +3819,12 @@ function EvaluationSection({ title, items, grades, settings, updateGrade, flexib
         {items.map((item) => (
           <div className="eval-card" key={item.key}>
             <div className="eval-head"><strong>{item.label}</strong><span>{formatPercent(flexible ? item.percent : settings[item.percentKey])}%</span></div>
-            <input className={`input grade${isScoreInRange(grades[item.key]) ? '' : ' invalid'}`} inputMode="decimal" placeholder="—" aria-invalid={!isScoreInRange(grades[item.key])} value={grades[item.key]} onChange={(e) => updateGrade(item.key, e.target.value)} />
+            <div className="grade-input-wrap">
+              <input className={`input grade${isScoreInRange(grades[item.key]) ? '' : ' invalid'}`} inputMode="decimal" placeholder="—" aria-invalid={!isScoreInRange(grades[item.key])} value={grades[item.key] ?? ''} onChange={(e) => updateGrade(item.key, e.target.value)} />
+              {grades[item.key] !== '' && grades[item.key] !== null && grades[item.key] !== undefined && (
+                <button type="button" className="grade-clear" aria-label={`Limpiar ${item.label}`} title={`Limpiar ${item.label}`} onClick={() => updateGrade(item.key, '')}>×</button>
+              )}
+            </div>
             {!isScoreInRange(grades[item.key]) && <small className="grade-range-error" role="alert">Debe estar entre 0 y 20.</small>}
           </div>
         ))}
