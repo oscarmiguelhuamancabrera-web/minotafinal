@@ -510,3 +510,8 @@
 @media (prefers-reduced-motion: reduce) {
   .side-nav { transition: none; }
 }
+
+/* Separación entre una fila de combos y la fila de botones que la sigue
+   (p. ej. "Agregar curso a mi lista"). */
+.card .grid + .action-row,
+.card .grid + .hint + .action-row { margin-top: 16px; }
