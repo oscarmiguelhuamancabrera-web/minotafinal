@@ -6,6 +6,8 @@ import { APP_TIME_ZONE, formatPeruHour, isWithinPeruPeriod as isWithinPeriod, to
 import { initPwaUpdates } from './pwaUpdates'
 import PwaInstallButton from './components/PwaInstallButton'
 import ConnectionStatus from './components/ConnectionStatus'
+import Icon from './components/Icon.jsx'
+import { AverageRing, EvolutionChart, StatusLegend, TrendBadge } from './components/DashboardCharts.jsx'
 import { useTheme } from './components/ThemeProvider.jsx'
 import HalloweenHeroBats from './themes/halloween-2026/components/HalloweenHeroBats.jsx'
 import { courseCreditIsConfirmed, storedCourseCredits, weightedAverageSummary } from './utils/weighted'
@@ -492,6 +494,76 @@ function courseCycleName(course) {
 
 function latestHistoryForCourse(history, courseId) {
   return (history || []).find((item) => item.course_id === courseId) || null
+}
+
+function gradeStatusGroup(status) {
+  const value = String(status || '').toLowerCase()
+  if (value.startsWith('desaprob')) return 'failed'
+  if (value.startsWith('aprob')) return 'approved'
+  return 'progress'
+}
+
+// Resumen del dashboard: estado del último resultado guardado de cada curso actual.
+function dashboardGradeSummary(courses = [], history = []) {
+  const summary = { approved: 0, progress: 0, failed: 0, average: null }
+  const averages = []
+  ;(courses || []).forEach((course) => {
+    const latest = latestHistoryForCourse(history, course.id)
+    if (!latest) {
+      summary.progress += 1
+      return
+    }
+    summary[gradeStatusGroup(latest.status)] += 1
+    const value = toNumber(latest.current_average)
+    if (value !== null) averages.push(value)
+  })
+  if (averages.length) summary.average = averages.reduce((sum, value) => sum + value, 0) / averages.length
+  return summary
+}
+
+function toRoman(number) {
+  const value = Number(number)
+  if (!Number.isInteger(value) || value <= 0 || value > 39) return ''
+  const table = [[10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]
+  let rest = value
+  let out = ''
+  table.forEach(([n, r]) => { while (rest >= n) { out += r; rest -= n } })
+  return out
+}
+
+// Promedio por ciclo (último resultado de cada curso), ordenado por ciclo.
+function averageEvolution(history = [], cycles = []) {
+  const latestByCourse = new Map()
+  ;(history || []).forEach((item) => {
+    if (!latestByCourse.has(item.course_id)) latestByCourse.set(item.course_id, item)
+  })
+  const byCycle = new Map()
+  latestByCourse.forEach((item) => {
+    const cycleId = item.course?.cycle_id
+    const value = toNumber(item.current_average)
+    if (!cycleId || value === null) return
+    if (!byCycle.has(cycleId)) byCycle.set(cycleId, [])
+    byCycle.get(cycleId).push(value)
+  })
+  return [...byCycle.entries()]
+    .map(([cycleId, values]) => {
+      const cycle = (cycles || []).find((item) => item.id === cycleId)
+      const order = Number(cycle?.order_number) || 0
+      return {
+        id: cycleId,
+        order,
+        name: cycle?.name || 'Ciclo',
+        label: toRoman(order) || (cycle?.name || 'Ciclo').slice(0, 4),
+        value: values.reduce((sum, v) => sum + v, 0) / values.length
+      }
+    })
+    .sort((a, b) => a.order - b.order)
+}
+
+function shortAcademicContext(profile) {
+  if (!profile) return ''
+  if (profile.role === 'admin' || profile.role === 'superadmin') return 'Administrador general'
+  return [profile.university?.code || profile.university?.name, profile.career?.name, profile.cycle?.name].filter(Boolean).join(' · ')
 }
 
 function courseCredits(course) {
@@ -2820,7 +2892,7 @@ function App() {
         </div>
       )}
       {floatingAnnouncement && <FloatingAnnouncementModal announcement={floatingAnnouncement} onClose={() => closeFloatingAnnouncement(floatingAnnouncement.id)} />}
-      <main className="app-container">
+      <main className={`app-container${session || guestMode ? ' with-shell' : ''}`}>
         {!session && !guestMode && (screen === 'login' || screen === 'welcome') && (
           <Login
             onSubmit={handleLogin}
@@ -2848,6 +2920,7 @@ function App() {
             screen={screen}
             setScreen={setScreen}
             navItems={navItems}
+            unreadCount={isAdmin || guestMode ? 0 : announcements.filter((item) => !item.read).length}
             onLegal={openLegalDocument}
             onSignOut={async () => { setGuestMode(false); await supabase.auth.signOut() }}
           >
@@ -3214,36 +3287,135 @@ function AuthCard({ title, children, onBack, className = '', onLegal }) {
   )
 }
 
-function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, setScreen, navItems, onLegal, onSignOut }) {
+const NAV_ICONS = {
+  dashboard: 'home',
+  courses: 'book',
+  calculator: 'calculator',
+  'guest-calculator': 'calculator',
+  history: 'clock',
+  communication: 'bell',
+  settings: 'settings',
+  'guest-settings': 'settings',
+  about: 'help',
+  more: 'menu',
+  'admin-dashboard': 'shield',
+  profile: 'user'
+}
+
+function AuthenticatedLayout({ children, profile, isAdmin, guestMode, screen, setScreen, navItems, unreadCount = 0, onLegal, onSignOut }) {
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const go = (key) => {
+    setScreen(key)
+    setDrawerOpen(false)
+    setMenuOpen(false)
+  }
+  const lastName = String(profile?.last_name || '').trim().split(/\s+/)[0] || ''
+  const displayName = guestMode ? 'Invitado' : `${firstWord(profile?.first_name || profile?.full_name)} ${lastName}`.trim()
+  const initial = (displayName || 'E').charAt(0).toUpperCase()
+  const roleLabel = guestMode ? 'Modo invitado' : isAdmin ? 'Administrador' : `Estudiante${profile?.university?.code ? ` ${profile.university.code}` : ''}`
+  const context = guestMode ? 'Modo invitado' : shortAcademicContext(profile)
+  const primary = guestMode
+    ? [['guest-calculator', 'Calcular nota']]
+    : [['dashboard', 'Inicio'], ['courses', 'Cursos'], ['calculator', 'Calcular nota'], ['history', 'Historial'], ['communication', isAdmin ? 'Comunicación' : 'Avisos']]
+  const secondary = [
+    [guestMode ? 'guest-settings' : 'settings', 'Ajustes'],
+    ['about', 'Ayuda'],
+    ...(isAdmin ? [['admin-dashboard', 'Admin']] : [])
+  ]
+  const isActive = (key) => screen === key || (key === 'admin-dashboard' && String(screen).startsWith('admin'))
+  const bottomItems = navItems.filter(([key]) => key !== 'more').slice(0, 5)
+
+  useEffect(() => {
+    if (!drawerOpen && !menuOpen) return undefined
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        setDrawerOpen(false)
+        setMenuOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [drawerOpen, menuOpen])
+
+  const navButton = ([key, label]) => (
+    <button key={key} type="button" className={`side-link${isActive(key) ? ' active' : ''}`} aria-current={isActive(key) ? 'page' : undefined} onClick={() => go(key)}>
+      <Icon name={NAV_ICONS[key] || 'info'} />
+      <span>{label}</span>
+      {key === 'communication' && unreadCount > 0 && <em className="side-badge">{unreadCount > 9 ? '9+' : unreadCount}</em>}
+    </button>
+  )
+
   return (
-    <div className="layout">
-      <header className="topbar">
-        <div className="brand-inline">
-          <img src="/icon-192.png" alt="Logo" />
-          <div>
-            <strong>Mi Nota Final</strong>
-            <span>{guestMode ? 'Modo invitado' : `Hola, ${firstWord(profile?.first_name || profile?.full_name)}`}</span>
-          </div>
+    <div className={`layout layout-v2${drawerOpen ? ' drawer-open' : ''}`}>
+      <aside className="side-nav" aria-label="Navegación principal">
+        <div className="side-brand">
+          <span className="side-brand-mark"><Icon name="cap" size={40} strokeWidth={1.6} /></span>
+          <strong>Mi Nota Final</strong>
+          <button type="button" className="side-close" aria-label="Cerrar menú" onClick={() => setDrawerOpen(false)}><Icon name="close" /></button>
         </div>
-        <PwaInstallButton />
-        <nav className="desktop-nav">
-          {!guestMode && <button className={screen === 'dashboard' ? 'active' : ''} onClick={() => setScreen('dashboard')}>Inicio</button>}
-          {!guestMode && <button className={screen === 'courses' ? 'active' : ''} onClick={() => setScreen('courses')}>Cursos</button>}
-          <button className={screen === 'calculator' || screen === 'guest-calculator' ? 'active' : ''} onClick={() => setScreen(guestMode ? 'guest-calculator' : 'calculator')}>Calcular</button>
-          {!guestMode && <button className={screen === 'history' ? 'active' : ''} onClick={() => setScreen('history')}>Historial</button>}
-          {!guestMode && <button className={screen === 'communication' ? 'active' : ''} onClick={() => setScreen('communication')}>{isAdmin ? 'Comunicación' : 'Avisos'}</button>}
-          <button className={screen === 'settings' || screen === 'guest-settings' ? 'active' : ''} onClick={() => setScreen(guestMode ? 'guest-settings' : 'settings')}>Ajustes</button>
-          {isAdmin && <button className="admin-link" onClick={() => setScreen('admin-dashboard')}>Admin</button>}
-          <button className={screen === 'about' ? 'active' : ''} onClick={() => setScreen('about')}>Acerca</button>
-          <button onClick={onSignOut}>{guestMode ? 'Salir' : 'Cerrar sesión'}</button>
+        <nav className="side-links">{primary.map(navButton)}</nav>
+        <hr className="side-divider" />
+        <nav className="side-links">
+          {secondary.map(navButton)}
+          <button type="button" className="side-link" onClick={onSignOut}><Icon name="logout" /><span>{guestMode ? 'Salir' : 'Cerrar sesión'}</span></button>
         </nav>
-      </header>
-      <section className="content">{children}</section>
-      <Footer onLegal={onLegal} />
-      <nav className="mobile-nav">
-        {navItems.map(([key, icon, label]) => (
-          <button key={key} className={screen === key ? 'active' : ''} onClick={() => setScreen(key)}>
-            <span>{icon}</span><small>{label}</small>
+        <button type="button" className="side-profile" onClick={() => !guestMode && go('profile')} disabled={guestMode}>
+          <span className="avatar">{initial}<i aria-hidden="true" /></span>
+          <span className="side-profile-text"><strong>{displayName}</strong><small>{roleLabel}</small></span>
+        </button>
+      </aside>
+      {drawerOpen && <button type="button" className="side-backdrop" aria-label="Cerrar menú" onClick={() => setDrawerOpen(false)} />}
+
+      <div className="main-col">
+        <header className="topbar-v2">
+          <button type="button" className="icon-btn only-mobile" aria-label="Abrir menú" onClick={() => setDrawerOpen(true)}><Icon name="menu" size={26} /></button>
+          <div className="topbar-brand only-mobile"><Icon name="cap" size={32} strokeWidth={1.7} /><strong>Mi <span>Nota</span> Final</strong></div>
+          <div className="topbar-context only-desktop">
+            <span>Tu asistente académico</span>
+            {context && (
+              <button type="button" className="context-pill" onClick={() => !guestMode && go('profile')} disabled={guestMode} title={guestMode ? undefined : 'Cambiar perfil académico'}>
+                <Icon name="cap" size={17} /> {context}
+              </button>
+            )}
+          </div>
+          <div className="topbar-actions">
+            <span className="only-desktop"><PwaInstallButton /></span>
+            {!guestMode && (
+              <button type="button" className="icon-btn bell" aria-label={unreadCount ? `Avisos: ${unreadCount} sin leer` : 'Avisos'} onClick={() => go('communication')}>
+                <Icon name="bell" size={26} />
+                {unreadCount > 0 && <i className="bell-dot" aria-hidden="true" />}
+              </button>
+            )}
+            <div className="profile-menu">
+              <button type="button" className="profile-btn" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+                <span className="avatar"><Icon name="user" size={22} /></span>
+                <span className="only-desktop profile-name">{displayName}</span>
+                <span className="only-desktop"><Icon name="chevronDown" size={18} /></span>
+              </button>
+              {menuOpen && (
+                <>
+                  <button type="button" className="menu-backdrop" aria-label="Cerrar" onClick={() => setMenuOpen(false)} />
+                  <div className="profile-dropdown" role="menu">
+                    {!guestMode && <button type="button" role="menuitem" onClick={() => go('profile')}><Icon name="user" size={18} /> Mi perfil académico</button>}
+                    <button type="button" role="menuitem" onClick={() => go(guestMode ? 'guest-settings' : 'settings')}><Icon name="settings" size={18} /> Ajustes</button>
+                    <button type="button" role="menuitem" onClick={() => go('about')}><Icon name="help" size={18} /> Ayuda</button>
+                    <button type="button" role="menuitem" className="danger" onClick={() => { setMenuOpen(false); onSignOut() }}><Icon name="logout" size={18} /> {guestMode ? 'Salir' : 'Cerrar sesión'}</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </header>
+        <section className="content">{children}</section>
+        <Footer onLegal={onLegal} />
+      </div>
+
+      <nav className="mobile-nav bottom-nav" aria-label="Navegación inferior">
+        {bottomItems.map(([key, , label]) => (
+          <button key={key} type="button" className={screen === key ? 'active' : ''} aria-current={screen === key ? 'page' : undefined} onClick={() => go(key)}>
+            <Icon name={NAV_ICONS[key] || 'info'} size={24} />
+            <small>{label}</small>
           </button>
         ))}
       </nav>
@@ -3321,6 +3493,19 @@ function WeightedConfigurationModal({ modal, cycles, university, saving, onClose
   )
 }
 
+function DashStat({ icon, tone, value, label }) {
+  return (
+    <div className={`dash-stat ${tone}`}>
+      <span className="dash-stat-icon"><Icon name={icon} size={30} strokeWidth={1.8} /></span>
+      <div>
+        <strong>{value}</strong>
+        <p>{label}</p>
+      </div>
+      <span className="dash-stat-ghost" aria-hidden="true"><Icon name={icon} size={64} strokeWidth={1.4} /></span>
+    </div>
+  )
+}
+
 function Dashboard({ profile, cycles, courses, history, announcements = [], setScreen, onSelectCourse, weightedPreference, weightedPreferenceStatus, weightedPreferenceError, onEnableWeighted, onEditWeighted, onDisableWeighted }) {
   const { activeTheme } = useTheme()
   const halloweenActive = activeTheme?.id === 'halloween-2026'
@@ -3332,45 +3517,55 @@ function Dashboard({ profile, cycles, courses, history, announcements = [], setS
   const weightedEnabled = Boolean(weightedPreference?.enabled && weightedPreference?.cycle_id === profile?.current_cycle_id)
   const weightedSummary = weightedAverageSummary(courses, history)
   const pendingWeightedCourses = Math.max(0, courses.length - weightedSummary.rows.length)
+  const gradeSummary = useMemo(() => dashboardGradeSummary(courses, history), [courses, history])
+  const evolution = useMemo(() => averageEvolution(history, cycles), [history, cycles])
+  const trendDelta = evolution.length > 1 ? evolution[evolution.length - 1].value - evolution[evolution.length - 2].value : null
+  const name = firstWord(profile?.first_name || profile?.full_name)
+
   return (
-    <div className="page fade-in">
-      <div className="hero-panel dashboard-hero">
-        <HalloweenHeroBats active={halloweenActive} effects={activeTheme?.effects} />
-        <div className="hero-copy">
-          <p className="eyebrow">Tu espacio académico</p>
-          <h1>Hola, {firstWord(profile?.first_name || profile?.full_name)} <span className="hero-wave" aria-hidden="true">👋</span></h1>
-          <p>Tu asistente académico para planificar, calcular y llevar el control de tus notas.</p>
-          <small className="hero-context">{academicContext(profile)}</small>
-          <div className="hero-actions">
-            <button className="btn primary" onClick={() => setScreen('calculator')}>🧮 Calcular mis notas <span aria-hidden="true">→</span></button>
-            <button className="btn hero-outline" onClick={() => setScreen('courses')}>📚 Ver cursos</button>
-            <button className="btn hero-profile-link" onClick={() => setScreen('profile')}>↗ Cambiar perfil académico</button>
+    <div className="page fade-in dashboard-v2">
+      {halloweenActive ? (
+        <div className="hero-panel dashboard-hero">
+          <HalloweenHeroBats active={halloweenActive} effects={activeTheme?.effects} />
+          <div className="hero-copy">
+            <p className="eyebrow">Tu espacio académico</p>
+            <h1>Hola, {name} <span className="hero-wave" aria-hidden="true">👋</span></h1>
+            <p>Tu asistente académico para planificar, calcular y llevar el control de tus notas.</p>
+            <small className="hero-context">{academicContext(profile)}</small>
+            <div className="hero-actions">
+              <button className="btn primary" onClick={() => setScreen('calculator')}>🧮 Calcular mis notas <span aria-hidden="true">→</span></button>
+              <button className="btn hero-outline" onClick={() => setScreen('courses')}>📚 Ver cursos</button>
+            </div>
           </div>
-        </div>
-        {halloweenActive ? (
           <div className="hero-illustration-slot" aria-label="Ilustración de Halloween 2026" role="img">
             <picture className="hero-illustration-picture">
               {heroIllustrationMobile && <source media="(max-width: 820px)" srcSet={heroIllustrationMobile} type={heroIllustrationMobile.endsWith('.webp') ? 'image/webp' : undefined} />}
               <img className="hero-illustration" src={heroIllustration} alt="" aria-hidden="true" decoding="async" fetchPriority="high" />
             </picture>
           </div>
-        ) : (
-          <div className="hero-visual" aria-hidden="true">
-            <div className="hero-orb hero-orb-one" />
-            <div className="hero-orb hero-orb-two" />
-            <div className="hero-student-card"><span>✓</span><i /><i /><i /></div>
-            <div className="hero-cap">🎓</div>
-            <div className="hero-graph"><b /><b /><b /><b /></div>
-            <div className="hero-doodle">Pequeños<br />cálculos,<br /><strong>grandes logros</strong></div>
+        </div>
+      ) : (
+        <section className="dash-hero">
+          <img className="dash-hero-art" src="/themes/original/hero-dashboard.webp" alt="" aria-hidden="true" decoding="async" />
+          <div className="dash-hero-copy">
+            <span className="dash-eyebrow">Tu espacio académico <Icon name="sparkle" size={15} /></span>
+            <h1>¡Hola, <span>{name}</span>! <span className="hero-wave" aria-hidden="true">👋</span></h1>
+            <p>Planifica, calcula y lleva el control de tus notas de forma simple y organizada.</p>
+            <div className="dash-hero-actions">
+              <button type="button" className="btn primary" onClick={() => setScreen('calculator')}><Icon name="calculator" size={20} /> Calcular mis notas <Icon name="arrowRight" size={18} /></button>
+              <button type="button" className="btn dash-outline" onClick={() => setScreen('courses')}><Icon name="book" size={20} /> Ver mis cursos</button>
+            </div>
           </div>
-        )}
+        </section>
+      )}
+
+      <div className="dash-stats">
+        <DashStat icon="book" tone="violet" value={courses.length} label="Mis cursos actuales" />
+        <DashStat icon="award" tone="gold" value={!weightedEnabled ? '—' : (weightedSummary.average === null ? '—' : formatNumber(weightedSummary.average))} label="Promedio ponderado" />
+        <DashStat icon="chart" tone="green" value={history.length} label="Resultados guardados" />
+        <DashStat icon="building" tone="blue" value={profile?.university?.code || '—'} label="Universidad" />
       </div>
-      <div className="cards stats-grid">
-        <StatCard icon="📚" label="Mis cursos actuales" value={courses.length} />
-        <StatCard icon="⚖️" label="Promedio ponderado" value={!weightedEnabled ? '—' : (weightedSummary.average === null ? '—' : formatNumber(weightedSummary.average))} />
-        <StatCard icon="📊" label="Resultados guardados" value={history.length} />
-        <StatCard icon="🏛️" label="Universidad" value={profile?.university?.code || '—'} />
-      </div>
+
       {featuredAnnouncement && (
         <Card className={`announcement-card ${featuredAnnouncement.priority || 'normal'}`}>
           <div className="list-row">
@@ -3383,10 +3578,39 @@ function Dashboard({ profile, cycles, courses, history, announcements = [], setS
           </div>
         </Card>
       )}
+
+      <div className="dash-panels">
+        <section className="dash-panel">
+          <header className="dash-panel-head"><Icon name="chart" size={22} /><h3>Resumen de tus notas</h3></header>
+          {courses.length === 0 ? (
+            <Empty text="Aún no agregaste cursos a tu lista. Entra a Cursos y agrega solo los que estás llevando." compact />
+          ) : (
+            <div className="dash-summary">
+              <AverageRing value={gradeSummary.average} />
+              <StatusLegend approved={gradeSummary.approved} progress={gradeSummary.progress} failed={gradeSummary.failed} />
+            </div>
+          )}
+        </section>
+        <section className="dash-panel">
+          <header className="dash-panel-head">
+            <Icon name="chart" size={22} /><h3>Evolución del promedio</h3>
+            <TrendBadge delta={trendDelta} />
+          </header>
+          {evolution.length ? (
+            <>
+              <EvolutionChart points={evolution} />
+              {evolution.length === 1 && <p className="hint dash-chart-hint">Guarda resultados de cursos de otros ciclos para ver cómo evoluciona tu promedio.</p>}
+            </>
+          ) : (
+            <Empty text="Cuando guardes resultados, aquí verás la evolución de tu promedio por ciclo." compact />
+          )}
+        </section>
+      </div>
+
       <Card className="dashboard-summary-card">
         <div className="section-title">
-          <span>▥</span>
-          <h3>Resumen de tus notas</h3>
+          <span><Icon name="book" size={20} /></span>
+          <h3>Tus cursos</h3>
           <button className="btn ghost small" onClick={() => setScreen('calculator')}>Calcular</button>
         </div>
         {courses.length === 0 && (
@@ -3427,9 +3651,9 @@ function Dashboard({ profile, cycles, courses, history, announcements = [], setS
                     <h3>{course.name}</h3>
                     <p>{courseCycleName(course)} · {formatEnrollmentType(course.enrollment_type)} · {formatNumber(courseCredits(course), 1)} créditos</p>
                   </div>
-                    <div className="summary-status">
-                      <b>{weightedEnabled ? (latest ? formatNumber(latest.current_average) : 'Pendiente') : '—'}</b>
-                      <span>{weightedEnabled ? (latest?.status || 'Sin notas') : 'Ponderado desactivado'}</span>
+                  <div className="summary-status">
+                    <b>{weightedEnabled ? (latest ? formatNumber(latest.current_average) : 'Pendiente') : '—'}</b>
+                    <span>{weightedEnabled ? (latest?.status || 'Sin notas') : 'Ponderado desactivado'}</span>
                   </div>
                   <button className="btn secondary small" onClick={() => onSelectCourse(course.id)}>Calcular</button>
                 </div>
@@ -3438,11 +3662,6 @@ function Dashboard({ profile, cycles, courses, history, announcements = [], setS
           </div>
         )}
       </Card>
-      <div className="grid three dashboard-quick-actions">
-        <ActionCard title="Mis cursos" text="Agrega cursos regulares, arrastrados, adelantados, electivos u otros." button="Ver cursos" onClick={() => setScreen('courses')} />
-        <ActionCard title="Historial" text="Revisa los cálculos que decidiste guardar." button="Ver historial" onClick={() => setScreen('history')} />
-        <ActionCard title="Avisos y sugerencias" text="Revisa novedades, envía reportes y consulta respuestas del administrador." button="Ver avisos" onClick={() => setScreen('communication')} />
-      </div>
     </div>
   )
 }
