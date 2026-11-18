@@ -3065,7 +3065,6 @@ function Welcome({ onLogin, onRegister, onGoogle, onMicrosoft }) {
       <p>Calcula tu nota. Conoce tu meta. Aprueba.</p>
       <div className="stack">
         <SocialButton provider="google" onClick={onGoogle}>Continuar con Google</SocialButton>
-        <SocialButton provider="microsoft" onClick={onMicrosoft}>Continuar con Microsoft</SocialButton>
         <button className="btn secondary" onClick={onLogin}>✉️ Iniciar sesión con correo</button>
         <button className="btn ghost" onClick={onRegister}>Crear cuenta</button>
       </div>
@@ -3209,7 +3208,6 @@ function Login({ onSubmit, onReset, onGoogle, onMicrosoft, onRegister, onLegal }
       </label>
       <button className="btn primary" onClick={submitLogin}>Ingresar</button>
       <SocialButton provider="google" onClick={() => { persistPreference(); onGoogle() }}>Continuar con Google</SocialButton>
-      <SocialButton provider="microsoft" onClick={() => { persistPreference(); onMicrosoft() }}>Continuar con Microsoft</SocialButton>
       <div className="auth-links">
         <button className="btn link" onClick={() => onReset(email)}>Olvidé mi contraseña</button>
         <button className="btn link" onClick={onRegister}>Crear cuenta nueva</button>
